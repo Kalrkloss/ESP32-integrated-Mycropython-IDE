@@ -25,6 +25,19 @@ Empfohlener Weg: eigenes ESP-IDF-Projekt
   [docs/04-einhaengen-in-fremde-firmware.md](docs/04-einhaengen-in-fremde-firmware.md)
 - Fertiger Feature-Request an den Autor, falls Weg A gewählt wird:
   [docs/05-feature-request-cicciocb.md](docs/05-feature-request-cicciocb.md)
+- Weg C: MicroPython + LVGL als Basis (Aufwandsschätzung, Bausteine, Fallstricke):
+  [docs/06-micropython-route.md](docs/06-micropython-route.md)
+
+## Wege
+
+| Weg | Was | Status |
+|---|---|---|
+| A | Der Autor (cicciocb) baut UAC-Host in Annex ein — er hat Quellcode, Task-Ebene, Kommandotabelle; der USB-Host-Stack ist im S3-Build schon drin | Feature-Request-Text liegt bereit |
+| B | Eigene ESP-IDF-Firmware mit eigenem BASIC-Kern | Plan steht, Code offen |
+| C | Eigene MicroPython+LVGL-Firmware (Webserver, WebREPL, Web-Editor, Config-Page) | Aufwand geschätzt, favorisiert |
+
+„USB-Audio-Support in eine fremde Firmware einhängen" ist nicht möglich — Begründung in
+[docs/04-einhaengen-in-fremde-firmware.md](docs/04-einhaengen-in-fremde-firmware.md).
 
 ## Status
 
