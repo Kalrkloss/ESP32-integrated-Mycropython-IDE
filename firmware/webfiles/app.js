@@ -1,10 +1,10 @@
-// ESP32-Debug: Bedienlogik der Weboberflaeche.
-// Klassisches Skript (keine Module): die Funktionen sind global, weil die
-// Schaltflaechen in index.html sie per onclick="..." aufrufen.
+// ESP32 debug: UI logic of the web interface.
+// Classic script (no modules): the functions are global because the buttons in
+// index.html call them inline via onclick="...".
 
-var verlauf = [];
-var vpos = 0;
-var aktuellerPfad = "/";
+var history = [];
+var historyPos = 0;
+var currentPath = "/";
 
 function el(id) {
   return document.getElementById(id);
@@ -16,9 +16,9 @@ var editor = null;
 
 function editorEinrichten() {
   if (typeof CodeMirror === "undefined") {
-    // Ersatzweg: fehlen die Editor-Dateien auf dem Geraet, bleibt das einfache Textfeld
+    // Ersatzweg: fehlen die editor files on the device, bleibt das einfache Textfeld
     editorTasten();
-    setStatus("CodeMirror nicht geladen -- einfaches Textfeld");
+    setStatus("CodeMirror not loaded -- plain text area");
     return;
   }
   editor = CodeMirror.fromTextArea(el("code"), {
@@ -33,8 +33,8 @@ function editorEinrichten() {
     autoCloseBrackets: true,
     styleActiveLine: true,
     extraKeys: {
-      "Ctrl-S": speichern,
-      "Cmd-S": speichern,
+      "Ctrl-S": saveFile,
+      "Cmd-S": saveFile,
       "Tab": function (cm) { cm.replaceSelection("    ", "end"); },
       "Shift-Tab": "indentLess",
       "Ctrl-/": "toggleComment"
@@ -57,23 +57,23 @@ function editorSet(text) {
   }
 }
 
-function suchen() {
+function openSearch() {
   if (editor) {
     editor.execCommand("find");
   } else {
-    alert("Suchen: Strg-F im Textfeld (kein Editor geladen)");
+    alert("Search: Ctrl-F in the text area (no editor loaded)");
   }
 }
 
-function zeige(text) {
+function show(text) {
   var o = el("out");
   o.textContent += text;
   o.scrollTop = o.scrollHeight;
 }
 
-function api(pfad, optionen, art) {
+function api(url, optionen, art) {
   art = art || "json";
-  return fetch(pfad, optionen).then(function (a) {
+  return fetch(url, optionen).then(function (a) {
     if (art === "text") {
       return a.text();
     }
@@ -97,25 +97,25 @@ function reiterEinrichten() {
       this.classList.add("active");
       el(this.getAttribute("data-tab")).classList.add("active");
       if (this.getAttribute("data-tab") === "editor" && editor) {
-        // CodeMirror wird im versteckten Reiter erzeugt und muss beim Sichtbarwerden
-        // neu zeichnen (sonst fehlen Zeilennummern und Hervorhebung).
+        // CodeMirror is created inside the hidden tab and has to redraw when it
+        // becomes visible (otherwise line numbers and highlighting are missing).
         editor.refresh();
       }
     });
   }
 }
 
-// ---------------------------------------------------------------- Konsole
+// ---------------------------------------------------------------- Console
 
-function senden() {
+function sendCommand() {
   var feld = el("cmd");
   var code = feld.value;
   if (!code.trim()) {
     return;
   }
-  verlauf.push(code);
-  vpos = verlauf.length;
-  zeige(">>> " + code + "\n");
+  history.push(code);
+  historyPos = history.length;
+  show(">>> " + code + "\n");
   feld.value = "";
   el("repl-status").textContent = "laeuft ...";
   api("/api/exec", {
@@ -123,22 +123,22 @@ function senden() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ code: code })
   }).then(function (a) {
-    zeige(a.output + "\n");
+    show(a.output + "\n");
     el("repl-status").textContent = "";
     zustand();
   }).catch(function (f) {
-    zeige("Fehler: " + f + "\n");
+    show("Error: " + f + "\n");
     el("repl-status").textContent = "";
   });
 }
 
-function logHolen() {
+function fetchLog() {
   api("/api/log", {}, "text").then(function (t) {
-    zeige(t + "\n");
+    show(t + "\n");
   });
 }
 
-function leeren() {
+function clearLog() {
   el("out").textContent = "";
 }
 
@@ -194,12 +194,12 @@ function liveToggle(box) {
   shot(true);
 }
 
-function neuStart() {
-  if (!confirm("Board wirklich neu starten?")) {
+function restartBoard() {
+  if (!confirm("Really restart the board?")) {
     return;
   }
   api("/api/reset", { method: "POST" }).then(function () {
-    zeige("Neustart ausgeloest.\n");
+    show("Restart triggered.\n");
   });
 }
 
@@ -209,42 +209,42 @@ function setStatus(text) {
   el("e-status").textContent = text;
 }
 
-function laden() {
+function openFile() {
   var p = el("e-path").value;
-  setStatus("oeffne ...");
+  setStatus("opening ...");
   api("/api/file?path=" + encodeURIComponent(p)).then(function (a) {
     if (a.error) {
       setStatus(a.error);
       return;
     }
     if (a.binary) {
-      setStatus("Binaerdatei (" + a.size + " Byte) -- nur Download");
+      setStatus("binary file (" + a.size + " Byte) -- download only");
       return;
     }
     editorSet(a.data);
-    setStatus("geoeffnet: " + a.data.length + " Zeichen");
+    setStatus("opened: " + a.data.length + " characters");
     zeilenInfo();
   }).catch(function (f) {
-    setStatus("Fehler: " + f);
+    setStatus("Error: " + f);
   });
 }
 
-function speichern() {
+function saveFile() {
   var p = el("e-path").value;
-  setStatus("speichere ...");
+  setStatus("saving ...");
   api("/api/file?path=" + encodeURIComponent(p), {
     method: "POST",
     headers: { "Content-Type": "text/plain" },
     body: editorText()
   }).then(function (a) {
-    setStatus(a.error ? a.error : ("gespeichert: " + a.bytes + " Byte"));
-    dateienLaden();
+    setStatus(a.error ? a.error : ("saved: " + a.bytes + " Byte"));
+    loadFiles();
   }).catch(function (f) {
-    setStatus("Fehler: " + f);
+    setStatus("Error: " + f);
   });
 }
 
-function ausfuehren() {
+function runFile() {
   var code = editorText();
   api("/api/exec", {
     method: "POST",
@@ -252,16 +252,16 @@ function ausfuehren() {
     body: JSON.stringify({ code: code })
   }).then(function (a) {
     setStatus("ausgefuehrt");
-    zeige("--- " + el("e-path").value + " ---\n" + a.output + "\n");
+    show("--- " + el("e-path").value + " ---\n" + a.output + "\n");
     zustand();
   }).catch(function (f) {
-    setStatus("Fehler: " + f);
+    setStatus("Error: " + f);
   });
 }
 
-function loeschen() {
+function deleteFile() {
   var p = el("e-path").value;
-  if (!confirm("Loeschen: " + p + " ?")) {
+  if (!confirm("Delete: " + p + " ?")) {
     return;
   }
   api("/api/file", {
@@ -269,24 +269,24 @@ function loeschen() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path: p })
   }).then(function (a) {
-    setStatus(a.error ? a.error : "geloescht");
-    dateienLaden();
+    setStatus(a.error ? a.error : "deleted");
+    loadFiles();
   });
 }
 
 function zeilenInfo() {
   if (editor) {
     var k = editor.getCursor();
-    el("e-cursor").textContent = "Zeile " + (k.line + 1) + ", Spalte " + (k.ch + 1);
-    el("e-info").textContent = editor.lineCount() + " Zeilen, "
-      + editor.getValue().length + " Zeichen";
+    el("e-cursor").textContent = "Line " + (k.line + 1) + ", column " + (k.ch + 1);
+    el("e-info").textContent = editor.lineCount() + " lines, "
+      + editor.getValue().length + " characters";
     return;
   }
   var t = el("code");
   var bis = t.value.slice(0, t.selectionStart);
   var zeilen = bis.split("\n");
-  el("e-cursor").textContent = "Zeile " + zeilen.length + ", Spalte " + (zeilen[zeilen.length - 1].length + 1);
-  el("e-info").textContent = t.value.length + " Zeichen, " + t.value.split("\n").length + " Zeilen";
+  el("e-cursor").textContent = "Line " + zeilen.length + ", column " + (zeilen[zeilen.length - 1].length + 1);
+  el("e-info").textContent = t.value.length + " characters, " + t.value.split("\n").length + " lines";
 }
 
 function editorTasten() {
@@ -304,41 +304,41 @@ function editorTasten() {
     }
     if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
       e.preventDefault();
-      speichern();
+      saveFile();
     }
   });
 }
 
-// ---------------------------------------------------------------- Dateien
+// ---------------------------------------------------------------- Files
 
-function dateienLaden() {
-  api("/api/files?path=" + encodeURIComponent(aktuellerPfad)).then(function (a) {
+function loadFiles() {
+  api("/api/files?path=" + encodeURIComponent(currentPath)).then(function (a) {
     if (a.error) {
       el("f-rows").innerHTML = '<tr><td colspan="3">' + a.error + "</td></tr>";
       return;
     }
     el("f-path").textContent = a.path;
-    if (a.speicher && a.speicher.frei !== undefined) {
-      el("f-free").textContent = "frei: " + Math.round(a.speicher.frei / 1024) + " KB von "
-        + Math.round(a.speicher.gesamt / 1024) + " KB";
+    if (a.memory && a.memory.free !== undefined) {
+      el("f-free").textContent = "free: " + Math.round(a.memory.free / 1024) + " KB of "
+        + Math.round(a.memory.total / 1024) + " KB";
     }
     var zeilen = "";
     for (var i = 0; i < a.entries.length; i++) {
       var e = a.entries[i];
-      var ziel = (a.path === "/" ? "" : a.path) + "/" + e.name;
-      var p = encodeURIComponent(ziel);
-      var akt = "";
+      var target = (a.path === "/" ? "" : a.path) + "/" + e.name;
+      var p = encodeURIComponent(target);
+      var actions = "";
       if (e.dir) {
-        akt += '<button class="btn" onclick="ordnerOeffnen(\'' + ziel + '\')">Oeffnen</button>';
+        actions += '<button class="btn" onclick="openFolder(\'' + target + '\')">Open</button>';
       } else {
-        akt += '<button class="btn" onclick="bearbeiten(\'' + ziel + '\')">Bearbeiten</button>'
+        actions += '<button class="btn" onclick="editFile(\'' + target + '\')">Edit</button>'
             + '<a class="btn" href="/api/file?download=1&path=' + p + '">Download</a>';
       }
-      akt += '<button class="btn" onclick="umbenennen(\'' + ziel + '\')">Umbenennen</button>'
-           + '<button class="btn" onclick="weg(\'' + ziel + '\')">Loeschen</button>';
+      actions += '<button class="btn" onclick="renameEntry(\'' + target + '\')">Rename</button>'
+           + '<button class="btn" onclick="weg(\'' + target + '\')">Delete</button>';
       zeilen += "<tr><td>" + (e.dir ? "&#128193; " : "") + e.name + "</td>"
               + '<td class="n">' + (e.dir ? "" : e.size) + "</td>"
-              + '<td class="act">' + akt + "</td></tr>";
+              + '<td class="act">' + actions + "</td></tr>";
     }
     el("f-rows").innerHTML = zeilen || '<tr><td colspan="3">(leer)</td></tr>';
   }).catch(function (f) {
@@ -346,26 +346,26 @@ function dateienLaden() {
   });
 }
 
-function ordnerOeffnen(p) {
-  aktuellerPfad = p;
-  dateienLaden();
+function openFolder(p) {
+  currentPath = p;
+  loadFiles();
 }
 
-function hoch() {
-  var t = aktuellerPfad.split("/").filter(function (x) { return x; });
+function goUp() {
+  var t = currentPath.split("/").filter(function (x) { return x; });
   t.pop();
-  aktuellerPfad = "/" + t.join("/");
-  dateienLaden();
+  currentPath = "/" + t.join("/");
+  loadFiles();
 }
 
-function bearbeiten(p) {
+function editFile(p) {
   el("e-path").value = p;
-  laden();
+  openFile();
   document.querySelector('nav button[data-tab="editor"]').click();
 }
 
 function weg(p) {
-  if (!confirm("Loeschen: " + p + " ?")) {
+  if (!confirm("Delete: " + p + " ?")) {
     return;
   }
   api("/api/file", {
@@ -376,11 +376,11 @@ function weg(p) {
     if (a.error) {
       alert(a.error);
     }
-    dateienLaden();
+    loadFiles();
   });
 }
 
-function umbenennen(p) {
+function renameEntry(p) {
   var neu = prompt("Neuer Name:", p);
   if (!neu || neu === p) {
     return;
@@ -393,68 +393,68 @@ function umbenennen(p) {
     if (a.error) {
       alert(a.error);
     }
-    dateienLaden();
+    loadFiles();
   });
 }
 
-function hochladen() {
+function uploadFile() {
   var f = el("upload").files[0];
   if (!f) {
-    alert("keine Datei gewaehlt");
+    alert("no file selected");
     return;
   }
-  var ziel = (aktuellerPfad === "/" ? "" : aktuellerPfad) + "/" + f.name;
-  var leser = new FileReader();
-  leser.onload = function () {
-    api("/api/file?path=" + encodeURIComponent(ziel), {
+  var target = (currentPath === "/" ? "" : currentPath) + "/" + f.name;
+  var reader = new FileReader();
+  reader.onload = function () {
+    api("/api/file?path=" + encodeURIComponent(target), {
       method: "POST",
       headers: { "Content-Type": "application/octet-stream" },
-      body: leser.result
+      body: reader.result
     }).then(function (a) {
       if (a.error) {
         alert(a.error);
       }
-      dateienLaden();
+      loadFiles();
     });
   };
-  leser.readAsArrayBuffer(f);
+  reader.readAsArrayBuffer(f);
 }
 
-function neueDatei() {
-  var n = prompt("Name der neuen Datei:", "neu.py");
+function newFile() {
+  var n = prompt("Name of the new file:", "neu.py");
   if (!n) {
     return;
   }
-  var ziel = (aktuellerPfad === "/" ? "" : aktuellerPfad) + "/" + n;
-  api("/api/file?path=" + encodeURIComponent(ziel), {
+  var target = (currentPath === "/" ? "" : currentPath) + "/" + n;
+  api("/api/file?path=" + encodeURIComponent(target), {
     method: "POST",
     headers: { "Content-Type": "text/plain" },
     body: "# " + n + "\n"
   }).then(function () {
-    bearbeiten(ziel);
+    editFile(target);
   });
 }
 
-function neuerOrdner() {
-  var n = prompt("Name des neuen Ordners:", "daten");
+function newFolder() {
+  var n = prompt("Name of the new folder:", "daten");
   if (!n) {
     return;
   }
   api("/api/mkdir", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: (aktuellerPfad === "/" ? "" : aktuellerPfad) + "/" + n })
+    body: JSON.stringify({ path: (currentPath === "/" ? "" : currentPath) + "/" + n })
   }).then(function (a) {
     if (a.error) {
       alert(a.error);
     }
-    dateienLaden();
+    loadFiles();
   });
 }
 
-// ---------------------------------------------------------------- Konfiguration
+// ---------------------------------------------------------------- Configuration
 
-function cfgLaden() {
+function loadConfig() {
   api("/api/config").then(function (a) {
     var c = a.config || {};
     var display = c.display || {};
@@ -484,17 +484,12 @@ function ladeAuswahl(c) {
   }
   var app = el("c-app");
   if (!app.options.length) {
-    api("/api/files?path=/apps").then(function (a) {
-      var names = ["launcher", "demo"];
-      (a.entries || []).forEach(function (entry) {
-        if (entry.name.slice(-3) === ".py") {
-          names.push(entry.name.slice(0, -3));
-        }
+    api("/api/apps").then(function (a) {
+      var list = (a.apps || []).map(function (entry) {
+        return '<option value="' + entry.name + '">' + (entry.title || entry.name) + "</option>";
       });
-      app.innerHTML = names.map(function (name) {
-        return '<option value="' + name + '">' + name + "</option>";
-      }).join("");
-      app.value = c.app || "launcher";
+      app.innerHTML = list.join("") || '<option value="launcher">launcher</option>';
+      app.value = c.app || a.running || "launcher";
     }).catch(function () {
       app.innerHTML = '<option value="launcher">launcher</option>';
     });
@@ -503,7 +498,20 @@ function ladeAuswahl(c) {
   }
 }
 
-function cfgSpeichern() {
+// Switch the running application without a restart: the request is serviced in the
+// LVGL thread by the main loop.
+function appJetzt() {
+  var name = el("c-app").value;
+  api("/api/app", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: name })
+  }).then(function (a) {
+    el("c-status").textContent = a.error ? a.error : ("switched to " + a.requested);
+  });
+}
+
+function saveConfig() {
   api("/api/config", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -518,11 +526,11 @@ function cfgSpeichern() {
     })
   }).then(function (a) {
     el("c-status").textContent = a.error ? a.error : "saved (restart needed for WiFi/hostname)";
-    cfgLaden();
+    loadConfig();
   });
 }
 
-function briJetzt() {
+function applyBrightness() {
   var w = parseInt(el("c-bri").value, 10);
   var code = "import display_config\n"
            + "d = display_config.LAST_DISPLAY\n"
@@ -534,7 +542,7 @@ function briJetzt() {
     body: JSON.stringify({ code: code })
   }).then(function (a) {
     el("c-status").textContent = "applied";
-    zeige(a.output + "\n");
+    show(a.output + "\n");
   });
 }
 
@@ -545,8 +553,8 @@ function zustand() {
     el("p-ip").textContent = "IP " + (a.ip || "?");
     el("p-heap").textContent = "Heap " + (a.heap ? Math.round(a.heap / 1024) + " KB" : "?");
     el("p-up").textContent = "Laufzeit " + (a.uptime_s ? Math.round(a.uptime_s) + " s" : "?");
-    if (a.speicher && a.speicher.frei !== undefined) {
-      el("p-fs").textContent = "frei " + Math.round(a.speicher.frei / 1024) + " KB";
+    if (a.memory && a.memory.free !== undefined) {
+      el("p-fs").textContent = "free " + Math.round(a.memory.free / 1024) + " KB";
     } else {
       el("p-fs").textContent = "";
     }
@@ -565,22 +573,22 @@ function start() {
   el("cmd").addEventListener("keydown", function (e) {
     if (e.key === "Enter") {
       e.preventDefault();
-      senden();
+      sendCommand();
     }
-    if (e.key === "ArrowUp" && verlauf.length) {
-      vpos = Math.max(0, vpos - 1);
-      this.value = verlauf[vpos] || "";
+    if (e.key === "ArrowUp" && history.length) {
+      historyPos = Math.max(0, historyPos - 1);
+      this.value = history[historyPos] || "";
     }
     if (e.key === "ArrowDown") {
-      vpos = Math.min(verlauf.length, vpos + 1);
-      this.value = verlauf[vpos] || "";
+      historyPos = Math.min(history.length, historyPos + 1);
+      this.value = history[historyPos] || "";
     }
   });
   el("c-bri").addEventListener("input", function () {
     el("c-bri-val").textContent = this.value + " %";
   });
-  cfgLaden();
-  dateienLaden();
+  loadConfig();
+  loadFiles();
   zustand();
   setInterval(zustand, 5000);
 }

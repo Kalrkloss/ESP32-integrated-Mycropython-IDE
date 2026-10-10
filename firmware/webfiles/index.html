@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -13,35 +13,35 @@
   <h1>ESP32-S3 Debug</h1>
   <span class="pill" id="p-ip">IP ...</span>
   <span class="pill" id="p-heap">Heap ...</span>
-  <span class="pill" id="p-up">Laufzeit ...</span>
+  <span class="pill" id="p-up">Uptime ...</span>
   <span class="pill" id="p-fs">FS ...</span>
 </header>
 
 <nav>
-  <button data-tab="repl" class="active">Konsole</button>
+  <button data-tab="repl" class="active">Console</button>
   <button data-tab="editor">Editor</button>
-  <button data-tab="files">Dateien</button>
-  <button data-tab="config">Konfiguration</button>
+  <button data-tab="files">Files</button>
+  <button data-tab="config">Configuration</button>
 </nav>
 
 <main>
   <section id="repl" class="active">
     <div class="card">
       <div class="row">
-        <button class="btn" onclick="logHolen()">Log holen</button>
-        <button class="btn" onclick="leeren()">Leeren</button>
+        <button class="btn" onclick="fetchLog()">Fetch log</button>
+        <button class="btn" onclick="clearLog()">Clear</button>
         <button class="btn" onclick="shot()">Screenshot</button>
-        <button class="btn" onclick="neuStart()">Board neu starten</button>
+        <button class="btn" onclick="restartBoard()">Restart board</button>
         <span class="muted" id="repl-status"></span>
       </div>
     </div>
     <div class="card">
-      <pre id="out">Bereit. Eine Zeile Python, dann Enter. Pfeil hoch/runter = Verlauf.</pre>
+      <pre id="out">Ready. One line of Python, then Enter. Up/Down arrow = history.</pre>
       <div class="row" style="margin-top:8px">
-        <input id="cmd" placeholder="print('hallo')" style="flex:1;min-width:240px" autocomplete="off">
-        <button class="btn p" onclick="senden()">Ausfuehren</button>
+        <input id="cmd" placeholder="print('hello')" style="flex:1;min-width:240px" autocomplete="off">
+        <button class="btn p" onclick="sendCommand()">Run</button>
       </div>
-      <div class="hint">Mehrzeiliger Code gehoert in den Editor -- dort "Ausfuehren" druecken.</div>
+      <div class="hint">Multi-line code belongs in the editor -- press "Run" there.</div>
     </div>
     <div class="card">
       <div class="row">
@@ -65,20 +65,20 @@
     <div class="card">
       <div class="row">
         <input id="e-path" value="/main.py" style="flex:1;min-width:200px">
-        <button class="btn" onclick="laden()">Oeffnen</button>
-        <button class="btn p" onclick="speichern()">Speichern</button>
-        <button class="btn" onclick="ausfuehren()">Ausfuehren</button>
-        <button class="btn" onclick="suchen()">Suchen</button>
-        <button class="btn" onclick="loeschen()">Loeschen</button>
+        <button class="btn" onclick="openFile()">Open</button>
+        <button class="btn p" onclick="saveFile()">Save</button>
+        <button class="btn" onclick="runFile()">Run</button>
+        <button class="btn" onclick="openSearch()">Search</button>
+        <button class="btn" onclick="deleteFile()">Delete</button>
         <span class="muted" id="e-status"></span>
       </div>
-      <div class="hint">Strg+S speichert, Strg+F sucht, Tab rueckt um 4 ein, Strg+/ kommentiert.
-        Der Editor ist CodeMirror (mitgeliefert auf dem Board, Python-Hervorhebung).</div>
+      <div class="hint">Ctrl+S saves, Ctrl+F searches, Tab indents 4 spaces, Ctrl+/ comments.
+        The editor is CodeMirror (shipped on the board, Python highlighting).</div>
     </div>
     <div class="card">
-      <textarea id="code" spellcheck="false" placeholder="# Datei oeffnen ..."></textarea>
+      <textarea id="code" spellcheck="false" placeholder="# open a file ..."></textarea>
       <div class="row" style="margin-top:8px">
-        <span class="muted" id="e-cursor">Zeile 1, Spalte 1</span>
+        <span class="muted" id="e-cursor">Line 1, column 1</span>
         <span class="muted" id="e-info"></span>
       </div>
     </div>
@@ -87,19 +87,19 @@
   <section id="files">
     <div class="card">
       <div class="row">
-        <button class="btn" onclick="hoch()">.. nach oben</button>
-        <button class="btn" onclick="dateienLaden()">Neu laden</button>
+        <button class="btn" onclick="goUp()">.. up</button>
+        <button class="btn" onclick="loadFiles()">Reload</button>
         <input type="file" id="upload" style="max-width:220px">
-        <button class="btn" onclick="hochladen()">Hochladen</button>
-        <button class="btn" onclick="neueDatei()">Neue Datei</button>
-        <button class="btn" onclick="neuerOrdner()">Neuer Ordner</button>
+        <button class="btn" onclick="uploadFile()">Upload</button>
+        <button class="btn" onclick="newFile()">New file</button>
+        <button class="btn" onclick="newFolder()">New folder</button>
       </div>
       <div class="crumb" id="f-path">/</div>
       <div class="hint" id="f-free"></div>
     </div>
     <div class="card">
       <table>
-        <thead><tr><th>Name</th><th class="n">Groesse</th><th class="act">Aktionen</th></tr></thead>
+        <thead><tr><th>Name</th><th class="n">Size</th><th class="act">Actions</th></tr></thead>
         <tbody id="f-rows"></tbody>
       </table>
     </div>
@@ -127,17 +127,18 @@
         </div>
       </div>
       <div class="row" style="margin-top:10px">
-        <button class="btn p" onclick="cfgSpeichern()">Speichern</button>
-        <button class="btn" onclick="cfgLaden()">Neu laden</button>
-        <button class="btn" onclick="briJetzt()">Helligkeit sofort anwenden</button>
+        <button class="btn p" onclick="saveConfig()">Save configuration</button>
+        <button class="btn" onclick="applyBrightness()">Apply brightness now</button>
+        <button class="btn" onclick="appJetzt()">Start application now</button>
+        <button class="btn" onclick="restartBoard()">Restart board</button>
         <span class="muted" id="c-status"></span>
       </div>
-      <div class="hint">WLAN und Hostname greifen nach einem Neustart. Gespeichert wird als
-        <code>config.json</code> auf dem Geraet; das Passwort wird nicht zurueckgelesen --
-        leer lassen heisst "bestehendes behalten".</div>
+      <div class="hint">WiFi and hostname take effect after a restart. Everything is written to
+        <code>config.json</code> on the device; the password is never read back --
+        leaving it empty keeps the stored one.</div>
     </div>
     <div class="card">
-      <label>Geraet</label>
+      <label>Device</label>
       <pre id="c-info">...</pre>
     </div>
   </section>
