@@ -42,6 +42,10 @@ case "${1:-all}" in
     mp fs cp "$REPO"/firmware/mcpsrv/mcp_*.py :
     echo "== Treiber =="
     mp fs cp "$REPO"/firmware/device/drivers/*.py :
+    echo "== Weboberflaeche =="
+    mp fs mkdir :web 2>/dev/null || true
+    mp fs cp "$REPO"/firmware/webfiles/index.html "$REPO"/firmware/webfiles/app.css "$REPO"/firmware/webfiles/app.js :web/
+    mp fs cp -r "$REPO"/firmware/webfiles/editor :web/
     echo "== App =="
     mp fs cp "$REPO"/firmware/device/main.py "$REPO"/firmware/device/display_config.py :
     if [ -f "$REPO"/firmware/device/wifi.json ]; then
@@ -60,6 +64,12 @@ case "${1:-all}" in
   lib)
     # Eigene (gepatchte) Treiber aus dem Repo -- Dateisystem ueberdeckt eingefrorene Module
     mp fs cp "$REPO"/firmware/device/drivers/*.py :
+    ;;
+  web)
+    echo "== Weboberflaeche (HTML/CSS/JS + Editor) =="
+    mp fs mkdir :web 2>/dev/null || true
+    mp fs cp "$REPO"/firmware/webfiles/index.html "$REPO"/firmware/webfiles/app.css "$REPO"/firmware/webfiles/app.js :web/
+    mp fs cp -r "$REPO"/firmware/webfiles/editor :web/
     ;;
   ls)
     mp fs ls
@@ -89,10 +99,11 @@ case "${1:-all}" in
     ;;
   *)
     cat <<EOF
-Aufruf: $0 {mods|all|test|lib|ls|rm <datei>|reset|run <datei.py>|exec <python>|repl}
+Aufruf: $0 {mods|all|test|lib|web|ls|rm <datei>|reset|run <datei.py>|exec <python>|repl}
 
   mods    Server-Module + Treiber kopieren (fuer den Bring-up, ohne main.py)
-  all     wie mods, zusaetzlich main.py, wifi.json und boot.py
+  all     wie mods, zusaetzlich Weboberflaeche, main.py, wifi.json und boot.py
+  web     nur die Weboberflaeche (HTML/CSS/JS + Editor) nach /web kopieren
   test    test_screen.py hochladen und auf dem Board ausfuehren (Panel-Bring-up)
   lib     nur die eigenen Treiber kopieren
   ls      Dateien auf dem Board auflisten

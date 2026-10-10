@@ -36,8 +36,20 @@ def report(step, exc):
 
 def start_display():
     global _DISPLAY
-    _DISPLAY, _bus = display_config.create_display(full_frames=True, brightness=70)
+    _DISPLAY, _bus = display_config.create_display(full_frames=True,
+                                                   brightness=config_brightness())
     return _DISPLAY
+
+
+def config_brightness(default=70):
+    """Helligkeit aus config.json (Weboberflaeche) -- sonst Standardwert."""
+    try:
+        import json
+        with open("config.json") as fh:
+            wert = int(json.load(fh).get("brightness", default))
+        return max(0, min(100, wert))
+    except (OSError, ValueError, TypeError):
+        return default
 
 
 def start_touch():
@@ -119,6 +131,7 @@ def main():
     ip = device_ip()
     try:
         start_display()
+        mcp_screen.attach_framebuffer()
     except Exception as exc:  # noqa: BLE001
         report("Display", exc)
     try:

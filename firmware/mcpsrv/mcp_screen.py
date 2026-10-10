@@ -202,6 +202,34 @@ def capture(scale=1):
     return data, width, height, swap
 
 
+def attach_framebuffer(which=1):
+    """Framebuffer des Displays anmelden -- Abzug ohne LVGL-Snapshot.
+
+    Ein Snapshot kostet auf diesem Board je nach Massstab 3 bis 20 s (LVGL-Snapshot
+    plus PNG-Kodierung in reinem Python; bei Massstab 2 laeuft er sogar in die
+    Zeitueberschreitung). Mit angemeldetem Framebuffer liest `capture` direkt daraus.
+    Tearing ist moeglich, weil LVGL parallel schreibt -- fuer Vorschauen unerheblich.
+    """
+    try:
+        import display_config
+    except ImportError as exc:
+        return "display_config nicht verfuegbar (%s)" % exc
+    display = getattr(display_config, "LAST_DISPLAY", None)
+    if display is None:
+        return "kein Display angemeldet -- Framebuffer nicht verfuegbar"
+    puffer = getattr(display, "_frame_buffer2" if int(which) == 2 else "_frame_buffer1", None)
+    if puffer is None:
+        return "Display hat keinen Framebuffer %s" % which
+    return describe_after_attach(puffer, which)
+
+
+def describe_after_attach(puffer, which):
+    import display_config
+    attach(puffer, display_config.WIDTH, display_config.HEIGHT, byte_swap=True,
+           label="Display-Framebuffer %s" % which)
+    return describe()
+
+
 # --------------------------------------------------------------------------
 # Widget-Baum
 # --------------------------------------------------------------------------

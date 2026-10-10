@@ -39,17 +39,21 @@ class Request:
 
 
 class Response:
-    __slots__ = ("status", "headers", "body")
+    __slots__ = ("status", "headers", "body", "datei")
 
-    def __init__(self, status=200, body=b"", headers=None):
+    def __init__(self, status=200, body=b"", headers=None, datei=None):
         self.status = status
         if isinstance(body, str):
             body = body.encode()
         self.body = body
         self.headers = headers or {}
+        # datei: Pfad, dessen Inhalt gestueckt gesendet wird. Auf dem Geraet wichtig --
+        # 174 KB am Stueck in den Speicher zu holen kostet unnoetig Platz und kann
+        # fehlschlagen, waehrend die Datei problemlos haeppchenweise rausgeht.
+        self.datei = datei
 
     def __repr__(self):  # pragma: no cover
-        return "<Response %s %dB>" % (self.status, len(self.body))
+        return "<Response %s %s>" % (self.status, self.datei or ("%dB" % len(self.body)))
 
 
 REASONS = {
@@ -142,13 +146,27 @@ def write_response(stream, resp):
     head = ["HTTP/1.1 %d %s" % (resp.status, reason)]
     headers = dict(resp.headers)
     headers.setdefault("Content-Type", "application/octet-stream")
-    headers["Content-Length"] = str(len(resp.body))
+    groesse = len(resp.body)
+    if resp.datei is not None:
+        try:
+            import os
+            groesse = os.stat(resp.datei)[6]
+        except OSError:
+            groesse = 0
+    headers["Content-Length"] = str(groesse)
     headers.setdefault("Connection", "close")
     headers.setdefault("Access-Control-Allow-Origin", "*")
     for k, v in headers.items():
         head.append("%s: %s" % (k, v))
     stream.write(("\r\n".join(head) + "\r\n\r\n").encode())
-    if resp.body:
+    if resp.datei is not None:
+        with open(resp.datei, "rb") as fh:
+            while True:
+                stueck = fh.read(2048)
+                if not stueck:
+                    break
+                stream.write(stueck)
+    elif resp.body:
         stream.write(resp.body)
     # MicroPython-Sockets haben kein flush() -- CPython-Dateiobjekte schon.
     flush = getattr(stream, "flush", None)
@@ -177,7 +195,9 @@ def stream_for(conn):
     return conn.makefile("rwb")
 
 
-MAX_WORKERS = 3        # gleichzeitige Verbindungen; begrenzt, weil jeder Thread Stack kostet
+MAX_WORKERS = 4        # gleichzeitige Verbindungen; die Weboberflaeche holt mehrere
+                       # Endpunkte parallel (Status, Dateien, Konfiguration, Bild),
+                       # deshalb nicht knapper als noetig begrenzen
 WORKER_STACK = 16384   # Bytes Stack pro Verbindung (JSON + PNG brauchen etwas Luft)
 
 
@@ -266,6 +286,24 @@ class HttpServer:
         self._open()
         start_worker(self.serve_forever, ())
 
+    def _find_handler(self, method, path):
+        """Exakter Treffer, sonst Praefix-Route (Schluessel endet auf '*').
+
+        Praefix-Routen werden fuer Dateibaeume gebraucht (z.B. den mitgelieferten
+        Codeeditor), damit nicht jede einzelne Datei eingetragen werden muss.
+        """
+        handler = self.routes.get(method + " " + path)
+        if handler is not None:
+            return handler
+        for key, kandidat in self.routes.items():
+            if not key.endswith("*"):
+                continue
+            k_methode, _, k_praefix = key.partition(" ")
+            k_praefix = k_praefix[:-1]          # das "*" gehoert nicht zum Vergleich
+            if k_methode == method and path.startswith(k_praefix):
+                return kandidat
+        return None
+
     def _handle(self, conn, addr):
         stream = stream_for(conn)
         try:
@@ -276,7 +314,7 @@ class HttpServer:
         if req is None:
             return
         req.client = addr
-        handler = self.routes.get(req.method + " " + req.path)
+        handler = self._find_handler(req.method, req.path)
         if handler is None:
             write_response(stream, text(404, "kein Handler fuer %s %s" % (req.method, req.path)))
             return

@@ -22,6 +22,7 @@ import mcp_protocol as protocol  # noqa: E402
 import mcp_httpd as httpd  # noqa: E402
 import mcp_screen as screen  # noqa: E402
 import mcp_serve as serve  # noqa: E402
+import mcp_webui as webui  # noqa: E402
 
 FAILURES = []
 CHECKS = [0]
@@ -210,6 +211,10 @@ def http_request(port, method, path, body=None, headers=None, timeout=5):
 def test_end_to_end():
     print("Ende-zu-Ende ueber HTTP (echter Socket)")
     port = 8098
+    # Die Weboberflaeche liegt als Dateien im Repo -- im Test zeigt ROOT dorthin,
+    # auf dem Geraet auf das Verzeichnis /web.
+    webui.ROOT = os.path.join(os.path.dirname(HERE), "firmware")
+    webui.WEB_DIR = "webfiles"
     screen.attach(synthetic_screen(64, 32), 64, 32, byte_swap=True, label="test")
     mcp, server = serve.build_server(port=port)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -219,6 +224,10 @@ def test_end_to_end():
     try:
         status, headers, body = http_request(port, "GET", "/")
         check("GET / -> 200", status == 200, "%s" % status)
+        check("GET / liefert die Weboberflaeche", b"<!DOCTYPE html>" in body)
+
+        status, headers, body = http_request(port, "GET", "/status")
+        check("GET /status -> 200", status == 200, "%s" % status)
         check("Status nennt Tools", b"screenshot" in body)
 
         status, headers, body = http_request(port, "GET", "/info")

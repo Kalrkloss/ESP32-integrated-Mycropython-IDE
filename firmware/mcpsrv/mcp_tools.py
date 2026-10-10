@@ -285,6 +285,17 @@ def build_routes(mcp_handler):
         blob = mcp_png.encode_rgb565_png(data, w, h, byte_swap=swap)
         return Response(200, blob, {"Content-Type": "image/png", "Cache-Control": "no-store"})
 
+    def screenshot_raw_route(req):
+        """Rohpuffer ohne PNG-Kodierung. Die Kodierung in reinem Python kostet auf
+        diesem Board Sekunden bis Minuten -- fuer die Weboberflaeche wird der Puffer
+        deshalb roh uebertragen und im Browser in ein Bild umgerechnet."""
+        scale = int(req.arg("scale", "2"))
+        data, w, h, swap = mcp_screen.capture(scale=scale)
+        return Response(200, bytes(data), {"Content-Type": "application/octet-stream",
+                                           "X-Screen": "%dx%d" % (w, h),
+                                           "X-Byte-Swap": "1" if swap else "0",
+                                           "Cache-Control": "no-store"})
+
     def log_route(req):
         return text(200, mcp_logbuf.logs(clear=req.arg("clear") == "1"))
 
@@ -314,7 +325,7 @@ def build_routes(mcp_handler):
         "POST /mcp": mcp_handler,
         "GET /": status_route,
         "GET /screen.png": screenshot_route,
-        "GET /screen.raw": screenshot_route,
+        "GET /screen.raw": screenshot_raw_route,
         "GET /log": log_route,
         "POST /exec": exec_route,
         "GET /info": info_route,
