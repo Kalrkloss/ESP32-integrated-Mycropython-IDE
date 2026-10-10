@@ -70,9 +70,11 @@ Herstellerwerten: **I2C-Port 0, 400 kHz, kein RST/INT**.
 
 ## Datenformat (zur Kontrolle)
 
-Die Ruheantwort ist `85 85 85 85 85 85 85 85` -- **kein Fehler**, sondern
+Die Ruheantwort ist ein konstantes Byte-Muster -- **kein Fehler**, sondern
 "nichts beruehrt" (Byte 1 = Punktzahl; der Vendor-Code verwirft `> 1` genauso wie
-unser Treiber). Ein echter Datensatz sieht so aus:
+unser Treiber). Gemessen: `85 85 85 85 85 85 85 85` vor der ersten Beruehrung,
+danach `42 42 42 42 42 42 42 42`. Beide Muster sind Ruhe -- nicht als Defekt
+deuten. Ein echter Datensatz sieht so aus:
 
 ```
 00 01 80 45 01 b4 38 39
