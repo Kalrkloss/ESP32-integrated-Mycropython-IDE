@@ -15,26 +15,14 @@
 import sys
 import time
 
-import lcd_bus
-import machine
 import lvgl as lv
-import axs15231b
 
+import display_config
 import mcp_screen
 import mcp_serve
 
-WIDTH = 320
-HEIGHT = 480
-
-# Panel-/Busparameter des JC3248W535
-QSPI_SCK = 47
-QSPI_PINS = (21, 48, 40, 39)
-QSPI_CS = 45
-QSPI_DC = 8
-BACKLIGHT = 1
-TOUCH_SDA = 4
-TOUCH_SCL = 8
-FREQ = 40_000_000
+WIDTH = display_config.WIDTH
+HEIGHT = display_config.HEIGHT
 
 
 def report(step, exc):
@@ -42,29 +30,12 @@ def report(step, exc):
 
 
 def start_display():
-    spi_bus = machine.SPI.Bus(host=1, sck=QSPI_SCK, quad_pins=QSPI_PINS)
-    bus = lcd_bus.SPIBus(spi_bus=spi_bus, dc=QSPI_DC, cs=QSPI_CS,
-                         freq=FREQ, spi_mode=3, quad=True)
-    display = axs15231b.AXS15231B(
-        bus, WIDTH, HEIGHT, backlight_pin=BACKLIGHT,
-        color_space=lv.COLOR_FORMAT.RGB565, rgb565_byte_swap=True)
-    display.set_power(True)
-    display.set_backlight(70)
-    display.init()
-    print("main: Display ok (fb1=%d Bytes)" % len(display._frame_buffer1))
+    display, bus = display_config.create_display(full_frames=True, brightness=70)
     return display
 
 
 def start_touch():
-    import i2c
-    import axs15231
-    bus = i2c.I2C.Bus(host=1, sda=TOUCH_SDA, scl=TOUCH_SCL)
-    device = i2c.I2C.Device(bus, axs15231.I2C_ADDR, axs15231.BITS)
-    indev = axs15231.AXS15231(device)
-    try:
-        indev.enable_input_priority()
-    except Exception:  # noqa: BLE001
-        pass
+    indev = display_config.create_touch()
     print("main: Touch ok")
     return indev
 

@@ -43,7 +43,7 @@ case "${1:-all}" in
     echo "== Treiber =="
     mp fs cp "$REPO"/firmware/device/drivers/*.py :
     echo "== App =="
-    mp fs cp "$REPO"/firmware/device/main.py :
+    mp fs cp "$REPO"/firmware/device/main.py "$REPO"/firmware/device/display_config.py :
     if [ -f "$REPO"/firmware/device/wifi.json ]; then
       mp fs cp "$REPO"/firmware/device/wifi.json :
     else
