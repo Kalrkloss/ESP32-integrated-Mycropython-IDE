@@ -288,7 +288,9 @@ def build_routes(mcp_handler):
         return json_response({"result": tool_exec(code)})
 
     def info_route(req):
-        return json_response(tool_device_info())
+        info = tool_device_info()
+        info["screen_status"] = mcp_screen.status()
+        return json_response(info)
 
     def screen_route(req):
         return json_response({"screen": mcp_screen.describe(), "attached": mcp_screen.attached()})

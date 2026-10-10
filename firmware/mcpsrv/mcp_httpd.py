@@ -150,7 +150,10 @@ def write_response(stream, resp):
     stream.write(("\r\n".join(head) + "\r\n\r\n").encode())
     if resp.body:
         stream.write(resp.body)
-    stream.flush()
+    # MicroPython-Sockets haben kein flush() -- CPython-Dateiobjekte schon.
+    flush = getattr(stream, "flush", None)
+    if flush is not None:
+        flush()
 
 
 def write_sse(stream, payload, event="message"):
@@ -174,6 +177,29 @@ def stream_for(conn):
     return conn.makefile("rwb")
 
 
+MAX_WORKERS = 3        # gleichzeitige Verbindungen; begrenzt, weil jeder Thread Stack kostet
+WORKER_STACK = 16384   # Bytes Stack pro Verbindung (JSON + PNG brauchen etwas Luft)
+
+
+def start_worker(fn, args):
+    """Startet einen Thread. Achtung: der dritte Parameter von start_new_thread ist in
+    MicroPython kwargs (kein Stackwert!) -- die Stackgroesse setzt man global ueber
+    _thread.stack_size()."""
+    if _thread is None:
+        return False
+    try:
+        setter = getattr(_thread, "stack_size", None)
+        if setter is not None:
+            setter(WORKER_STACK)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        _thread.start_new_thread(fn, args)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 class HttpServer:
     """Blockierender Server. `start_in_thread()` fuer den Betrieb neben LVGL."""
 
@@ -184,6 +210,7 @@ class HttpServer:
         self.on_error = on_error
         self.sock = None
         self.running = False
+        self._workers = 0
 
     def _open(self):
         s = socket.socket()
@@ -194,6 +221,9 @@ class HttpServer:
         return s
 
     def serve_forever(self):
+        """Nimmt Verbindungen an. Jede Verbindung bekommt einen eigenen Thread --
+        sonst blockiert ein einziger haengender Handler (z.B. eine wartende
+        LVGL-Anforderung) die gesamte Annahmeschleife."""
         s = self.sock or self._open()
         self.running = True
         while self.running:
@@ -201,22 +231,40 @@ class HttpServer:
                 conn, addr = s.accept()
             except OSError:
                 continue
+            if _thread is not None and self._workers < MAX_WORKERS:
+                self._workers += 1
+                if start_worker(self._worker, (conn, addr)):
+                    continue
+                self._workers -= 1
             try:
                 self._handle(conn, addr)
-            except Exception as exc:  # noqa: BLE001 - eine kaputte Verbindung darf den Server nicht killen
+            except Exception as exc:  # noqa: BLE001 - die Annahmeschleife darf nie sterben
                 if self.on_error:
                     self.on_error(exc)
             finally:
                 try:
                     conn.close()
-                except Exception:
+                except Exception:  # noqa: BLE001
                     pass
+
+    def _worker(self, conn, addr):
+        try:
+            self._handle(conn, addr)
+        except Exception as exc:  # noqa: BLE001
+            if self.on_error:
+                self.on_error(exc)
+        finally:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._workers -= 1
 
     def start_in_thread(self):
         if _thread is None:
             raise RuntimeError("kein _thread-Modul vorhanden")
         self._open()
-        _thread.start_new_thread(self.serve_forever, ())
+        start_worker(self.serve_forever, ())
 
     def _handle(self, conn, addr):
         stream = stream_for(conn)

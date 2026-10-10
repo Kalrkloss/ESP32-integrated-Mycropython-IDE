@@ -64,6 +64,38 @@ und ein Ende-zu-Ende-Durchlauf über echte Sockets (initialize → tools/list �
 tools/call screenshot → PNG dekodiert und geprüft, `/screen.png`, `/exec`, 202 für
 Notifications, SSE-Antwort, 404).
 
+## Auf dem Gerät verifiziert (MicroPython)
+
+Am Board nachgemessen und deshalb so implementiert:
+
+- **LVGL ist nicht thread-sicher.** Snapshots und Widget-Baum laufen als Auftrag über
+  `mcp_screen.request(...)`; die Hauptschleife führt sie mit
+  `mcp_screen.service_requests()` aus. Ergebnisse liegen **pro Auftragsnummer** in
+  `_RESULTS` — ein verspätetes Ergebnis hat sonst den nächsten Auftrag verfälscht
+  (genau das war zu beobachten). Timeout 20 s, weil ein Snapshot 1,6 s (scale=4) bis
+  mehrere Sekunden (scale=1) braucht.
+- **Eine Verbindung darf die Annahmeschleife nicht blockieren.** `HttpServer` bedient
+  jede Verbindung in einem eigenen Thread (max. 3). Vorher hat ein einziger hängender
+  Handler den ganzen Server lahmgelegt (Antworten kamen nie an).
+- **`_thread.start_new_thread(fn, args)`** — der dritte Parameter ist in MicroPython
+  *kwargs*, nicht die Stackgröße. Stackgröße global über `_thread.stack_size(n)`;
+  ein Zahlenwert als drittes Argument lässt den Thread stumm scheitern.
+- **`socket` hat kein `flush()`** — `write_response` prüft es jetzt.
+- **`sys.stdout` kann fehlen** (`mcp_logbuf.install()` bricht nicht mehr ab) und
+  **`bytes.decode()` nimmt `errors` nur positional**
+  (`bytes.decode()` → `TypeError: function doesn't take keyword arguments`).
+- **Snapshot-API** (LVGL 9.4 im Binding): `lv.snapshot_take(obj, lv.COLOR_FORMAT.RGB565)`
+  liefert `lv_draw_buf_t`; Maße über `.header.w/.h/.stride` (`.cf = 18` = RGB565),
+  Daten über `.data` als `C_Array` → mit `__dereference__(size)` in eine `memoryview`,
+  daraus direkt verkleinern und erst dann `snap.destroy()`.
+- **`deflate` ist vorhanden** (echte PNG-Kompression nutzbar), `zlib` fehlt; der
+  PNG-Encoder hat dafür einen Stored-Block-Rückfall.
+- **KeyboardInterrupt durchreichen**: In MicroPython erbt es von `Exception`; ein
+  blanket `except Exception` in der Hauptschleife macht das Board für Ctrl-C und damit
+  für `mpremote` unerreichbar.
+- **scale=2 ist der Standard für Screenshots** (160×240): full-res dauert auf dem ESP32
+  so lange, dass der HTTP-Client timeoutet.
+
 ## Betrieb auf dem Gerät (geplant)
 
 1. `mcp_serve.start()` nach dem WLAN-Connect aufrufen (aus `main.py`).

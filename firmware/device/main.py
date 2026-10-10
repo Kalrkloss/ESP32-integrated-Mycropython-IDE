@@ -1,141 +1,166 @@
-# main.py -- Bildschirm starten + Debug-MCP-Server hochziehen.
-# Reihenfolge ist wichtig: erst Display (damit der Framebuffer existiert und beim
-# Server angemeldet werden kann), dann Server, dann LVGL-Schleife.
+# main.py -- Boardstart: Display, Touch, UI, Debug-MCP-Server.
+#
+# Verifizierte Reihenfolge (auf dem JC3248W535 getestet):
+#   1. SPI-Bus + Display OHNE eigenen Framebuffer -> das Framework waehlt Partial-Render
+#      mit 2 x 30720-Byte-Puffern. Ein voller 307200-Byte-Puffer scheitert am
+#      SPI-Buslimit (max_transfer_sz = 32768).
+#   2. Touch erst NACH dem Display (pointer_framework prueft das) und ueber das
+#      i2c-Modul (Bus/Device) -- machine.I2C fuehrt zu "I2C operation not supported".
+#   3. Zuletzt der Server; danach laeuft die Schleife, die auch die Bildauftraege
+#      des Servers ausfuehrt (LVGL ist nicht thread-sicher).
+#
+# Fehler in einem Schritt werden gemeldet, aber nicht fatal -- der Debug-Server soll
+# moeglichst immer erreichbar sein.
 
 import sys
 import time
 
-# Module des Debug-Servers liegen flach im Geraete-Root (siehe tools/deploy.sh)
-import mcp_serve
+import lcd_bus
+import machine
+import lvgl as lv
+import axs15231b
+
 import mcp_screen
+import mcp_serve
 
 WIDTH = 320
 HEIGHT = 480
 
+# Panel-/Busparameter des JC3248W535
+QSPI_SCK = 47
+QSPI_PINS = (21, 48, 40, 39)
+QSPI_CS = 45
+QSPI_DC = 8
+BACKLIGHT = 1
+TOUCH_SDA = 4
+TOUCH_SCL = 8
+FREQ = 40_000_000
+
+
+def report(step, exc):
+    print("main: %s fehlgeschlagen -- %s: %s" % (step, type(exc).__name__, exc))
+
 
 def start_display():
-    """Display + Touch initialisieren, Framebuffer beim Debug-Server anmelden."""
-    import machine
-    import lcd_bus
-    import lvgl as lv
-    import axs15231b
-    import axs15231
-
-    # QSPI-Panel (Pins des JC3248W535)
-    spi_bus = machine.SPI.Bus(
-        host=1,
-        sck=47,
-        quad_pins=(21, 48, 40, 39),
-    )
-    display_bus = lcd_bus.SPIBus(
-        spi_bus=spi_bus,
-        dc=8,
-        cs=45,
-        freq=40_000_000,
-        spi_mode=3,
-        quad=True,
-    )
-    # EIN voller Framebuffer in PSRAM: wir halten die Referenz und koennen sie
-    # fuer Screenshots auslesen (das Panel braucht ohnehin Full-Frame-Updates).
-    fb = display_bus.allocate_framebuffer(WIDTH * HEIGHT * 2, lcd_bus.MEMORY_SPIRAM)
+    spi_bus = machine.SPI.Bus(host=1, sck=QSPI_SCK, quad_pins=QSPI_PINS)
+    bus = lcd_bus.SPIBus(spi_bus=spi_bus, dc=QSPI_DC, cs=QSPI_CS,
+                         freq=FREQ, spi_mode=3, quad=True)
     display = axs15231b.AXS15231B(
-        display_bus,
-        WIDTH,
-        HEIGHT,
-        frame_buffer1=fb,
-        backlight_pin=1,
-        color_space=lv.COLOR_FORMAT.RGB565,
-        rgb565_byte_swap=True,
-        backlight_on_state=axs15231b.STATE_PWM,
-    )
+        bus, WIDTH, HEIGHT, backlight_pin=BACKLIGHT,
+        color_space=lv.COLOR_FORMAT.RGB565, rgb565_byte_swap=True)
     display.set_power(True)
-    display.set_backlight(80)
+    display.set_backlight(70)
     display.init()
-
-    # Touch ueber I2C (AXS15231B); Pins werden beim Bring-up verifiziert
-    i2c = machine.I2C(0, sda=4, scl=8, freq=400_000)
-    indev = axs15231.AXS15231(i2c)
-    indev.enable_input_priority()
-
-    mcp_screen.attach(fb, WIDTH, HEIGHT, byte_swap=True, label="axs15231b fb1")
-    return display, indev
+    print("main: Display ok (fb1=%d Bytes)" % len(display._frame_buffer1))
+    return display
 
 
-def build_ui(ip):
-    import lvgl as lv
-
-    scr = lv.screen_active()
-    scr.set_style_bg_color(lv.color_hex(0x101820), 0)
-
-    title = lv.label(scr)
-    title.set_text("ESP32-S3 Debug")
-    title.set_style_text_color(lv.color_hex(0xFFFFFF), 0)
-    title.align(lv.ALIGN.TOP_MID, 0, 20)
-
-    info = lv.label(scr)
-    info.set_text("IP: %s\nMCP: http://%s/mcp" % (ip, ip))
-    info.set_style_text_color(lv.color_hex(0x8FD4FF), 0)
-    info.align(lv.ALIGN.TOP_LEFT, 12, 70)
-
-    btn = lv.button(scr)
-    btn.set_size(200, 60)
-    btn.align(lv.ALIGN.BOTTOM_MID, 0, -40)
-    label = lv.label(btn)
-    label.set_text("Tippen zaehlt")
-    label.center()
-
-    counter = {"n": 0}
-    note = lv.label(scr)
-    note.set_text("Touch: 0")
-    note.align(lv.ALIGN.BOTTOM_MID, 0, -120)
-
-    def on_click(_event):
-        counter["n"] += 1
-        note.set_text("Touch: %d" % counter["n"])
-        print("touch %d" % counter["n"])
-
-    btn.add_event_cb(on_click, lv.EVENT.CLICKED, None)
-    return scr
+def start_touch():
+    import i2c
+    import axs15231
+    bus = i2c.I2C.Bus(host=1, sda=TOUCH_SDA, scl=TOUCH_SCL)
+    device = i2c.I2C.Device(bus, axs15231.I2C_ADDR, axs15231.BITS)
+    indev = axs15231.AXS15231(device)
+    try:
+        indev.enable_input_priority()
+    except Exception:  # noqa: BLE001
+        pass
+    print("main: Touch ok")
+    return indev
 
 
-def main():
-    ip = "offline"
+def device_ip():
     try:
         import network
         sta = network.WLAN(network.STA_IF)
         if sta.isconnected():
-            ip = sta.ifconfig()[0]
-    except Exception:
+            return sta.ifconfig()[0]
+    except Exception:  # noqa: BLE001
         pass
+    return "offline"
+
+
+def build_ui(ip):
+    scr = lv.screen_active()
+    scr.set_style_bg_color(lv.color_hex(0x101820), 0)
+
+    title = lv.label(scr)
+    title.set_text("ESP32-S3 DEBUG")
+    title.set_style_text_color(lv.color_hex(0xFFFFFF), 0)
+    title.align(lv.ALIGN.TOP_MID, 0, 16)
+
+    info = lv.label(scr)
+    info.set_text("IP: %s\nMCP: http://%s/mcp" % (ip, ip))
+    info.set_style_text_color(lv.color_hex(0x8FD4FF), 0)
+    info.align(lv.ALIGN.TOP_LEFT, 12, 60)
+
+    box = lv.obj(scr)
+    box.set_size(100, 100)
+    box.center()
+    box.set_style_bg_color(lv.color_hex(0xE03030), 0)
+    box.set_style_border_width(3, 0)
+    box.set_style_border_color(lv.color_hex(0xFFFFFF), 0)
+
+    counter = {"n": 0}
+    note = lv.label(scr)
+    note.set_text("Touch: 0")
+    note.set_style_text_color(lv.color_hex(0x00E070), 0)
+    note.align(lv.ALIGN.BOTTOM_LEFT, 12, -70)
+
+    def on_click(_event):
+        counter["n"] += 1
+        note.set_text("Touch: %d" % counter["n"])
+        print("main: Touch %d" % counter["n"])
 
     try:
-        start_display()
-    except Exception as exc:  # noqa: BLE001 - Fehler sichtbar machen statt Absturz
-        print("main: Display-Start fehlgeschlagen: %s: %s" % (type(exc).__name__, exc))
+        box.add_flag(lv.obj.FLAG.CLICKABLE)
+    except Exception:  # noqa: BLE001
+        pass
+    box.add_event_cb(on_click, lv.EVENT.CLICKED, None)
 
+    bar = lv.bar(scr)
+    bar.set_size(280, 18)
+    bar.align(lv.ALIGN.BOTTOM_MID, 0, -30)
+    bar.set_value(60, 0)
+    print("main: UI ok")
+
+
+def main():
+    ip = device_ip()
+    try:
+        start_display()
+    except Exception as exc:  # noqa: BLE001
+        report("Display", exc)
+    try:
+        start_touch()
+    except Exception as exc:  # noqa: BLE001
+        report("Touch", exc)
     try:
         build_ui(ip)
     except Exception as exc:  # noqa: BLE001
-        print("main: UI-Aufbau fehlgeschlagen: %s: %s" % (type(exc).__name__, exc))
-
+        report("UI", exc)
     try:
         mcp_serve.start(port=80)
         print("main: Debug-Server auf http://%s/" % ip)
     except Exception as exc:  # noqa: BLE001
-        print("main: Server-Start fehlgeschlagen: %s: %s" % (type(exc).__name__, exc))
+        report("Server", exc)
+        try:
+            sys.print_exception(exc)
+        except Exception:  # noqa: BLE001
+            pass
 
-    # LVGL-Schleife: eigener Timer-Task, wenn verfuegbar, sonst manuell
-    try:
-        import task_handler
-        task_handler.TaskHandler(33)
-        while True:
-            time.sleep(1)
-    except ImportError:
-        import lvgl as lv
-        while True:
+    # Hauptschleife. Achtung: KeyboardInterrupt NICHT verschlucken -- in MicroPython
+    # erbt es von Exception, und ohne Durchreichen waere das Board per Ctrl-C
+    # (also auch mit mpremote) nicht mehr erreichbar.
+    while True:
+        try:
             lv.timer_handler()
-            time.sleep_ms(5)
+            mcp_screen.service_requests()
+        except KeyboardInterrupt:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            print("main: Schleife -- %s: %s" % (type(exc).__name__, exc))
+        time.sleep_ms(20)
 
 
-if __name__ == "__main__":
-    main()
+main()

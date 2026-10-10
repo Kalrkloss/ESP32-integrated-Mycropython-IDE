@@ -27,7 +27,8 @@ class RingBuffer:
         return bytes(self.buf)
 
     def text(self, clear=False):
-        out = self.buf.decode(errors="replace")
+        # MicroPython: bytes.decode() nimmt 'errors' nur positional
+        out = self.buf.decode("utf-8", "replace")
         prefix = ""
         if self.dropped:
             prefix = "[%d Bytes verworfen]\n" % self.dropped
@@ -74,10 +75,15 @@ RING = RingBuffer()
 
 
 def install(ring=None):
-    """Hängt den Mitschnitt vor sys.stdout (idempotent)."""
+    """Haengt den Mitschnitt vor sys.stdout (idempotent, robust wenn stdout fehlt)."""
     ring = ring or RING
-    if not isinstance(sys.stdout, Tee):
-        sys.stdout = Tee(sys.stdout, ring)
+    out = getattr(sys, "stdout", None)
+    if out is None or isinstance(out, Tee):
+        return ring
+    try:
+        sys.stdout = Tee(out, ring)
+    except Exception:  # noqa: BLE001 - Mitschnitt ist optional, nie den Start verhindern
+        pass
     return ring
 
 
