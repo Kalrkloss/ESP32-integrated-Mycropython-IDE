@@ -21,10 +21,15 @@ Empfohlener Weg: eigenes ESP-IDF-Projekt
 
 - Bausteine und Bewertung der Optionen: [docs/02-plan.md](docs/02-plan.md)
 - Vorgesehene BASIC-Kommandos: [docs/03-command-surface.md](docs/03-command-surface.md)
+- Warum man keine Task „in Annex einhängen" kann:
+  [docs/04-einhaengen-in-fremde-firmware.md](docs/04-einhaengen-in-fremde-firmware.md)
+- Fertiger Feature-Request an den Autor, falls Weg A gewählt wird:
+  [docs/05-feature-request-cicciocb.md](docs/05-feature-request-cicciocb.md)
 
 ## Status
 
 - [x] Machbarkeits-Analyse (REA/Ghidra gegen die Annahme „Annex-Quellcode rekonstruieren")
+- [x] Analyse „FreeRTOS-Task in eine fremde Firmware einhängen"
 - [ ] Auswahl der BASIC-Basis und Aufsetzen des ESP-IDF-Projekts
 - [ ] UAC-Host-Treiber anbinden (`espressif/usb_host_uac`)
 - [ ] I2S-Ausgang / Lautsprecherpfad
