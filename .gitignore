@@ -8,3 +8,4 @@ dependencies.lock
 *.map
 .vscode/
 .idea/
+firmware/device/wifi.json
