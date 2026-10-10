@@ -29,11 +29,21 @@ def tool_screenshot(scale=1, format="png"):
                                  % (w, h, scale, len(blob), mcp_screen.describe())}]}
 
 
-def tool_exec(code, quiet=False):
-    """Python-Code auf dem Geraet ausfuehren und stdout zurueckgeben."""
-    import io
-    sink = io.StringIO()
-    namespace = {"__name__": "__mcp__"}
+def tool_exec(code):
+    """Python-Code auf dem Geraet ausfuehren und die Ausgabe zurueckgeben.
+
+    `print` wird im Namespace des Codes ersetzt: MicroPython schreibt mit `print`
+    direkt in den C-stdout (nicht ueber sys.stdout), ein Mitschnitt dort wuerde also
+    nichts sehen. Ausgabe von `print(...)` wird hier eingesammelt und zurueckgegeben.
+    """
+    lines = []
+
+    def _print(*args, **kwargs):
+        sep = kwargs.get("sep", " ")
+        end = kwargs.get("end", "\n")
+        lines.append(sep.join(str(a) for a in args) + end)
+
+    namespace = {"__name__": "__mcp__", "print": _print}
     ok = True
     err = None
     started = time.time()
@@ -43,15 +53,12 @@ def tool_exec(code, quiet=False):
         ok = False
         err = "%s: %s" % (type(exc).__name__, exc)
     took = int((time.time() - started) * 1000)
-    out = sink.getvalue()
-    lines = ["exec %s in %d ms" % ("ok" if ok else "FEHLER", took)]
+
+    out = "".join(lines)
     if err:
-        lines.append(err)
-    tail = mcp_logbuf.logs()
-    if tail:
-        lines.append("--- Log (letzte Zeilen) ---")
-        lines.append(tail[-2000:])
-    return "\n".join(lines)
+        out += ("\n" if out and not out.endswith("\n") else "") + "FEHLER: " + err
+    out += "\n[exec %s in %d ms]" % ("ok" if ok else "fehlgeschlagen", took)
+    return out
 
 
 def tool_files(action="list", path="/", data=None, encoding="utf-8"):

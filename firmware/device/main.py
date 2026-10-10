@@ -18,26 +18,33 @@ import time
 import lvgl as lv
 
 import display_config
+import mcp_logbuf
 import mcp_screen
 import mcp_serve
 
 WIDTH = display_config.WIDTH
 HEIGHT = display_config.HEIGHT
 
+# Gehaltene Referenzen: ohne sie kann der GC Treiberobjekte wegraeumen.
+_DISPLAY = None
+_TOUCH = None
+
 
 def report(step, exc):
-    print("main: %s fehlgeschlagen -- %s: %s" % (step, type(exc).__name__, exc))
+    mcp_logbuf.log("main: %s fehlgeschlagen -- %s: %s" % (step, type(exc).__name__, exc))
 
 
 def start_display():
-    display, bus = display_config.create_display(full_frames=True, brightness=70)
-    return display
+    global _DISPLAY
+    _DISPLAY, _bus = display_config.create_display(full_frames=True, brightness=70)
+    return _DISPLAY
 
 
 def start_touch():
-    indev = display_config.create_touch()
-    print("main: Touch ok")
-    return indev
+    global _TOUCH
+    _TOUCH = display_config.create_touch()
+    mcp_logbuf.log("main: Touch ok")
+    return _TOUCH
 
 
 def device_ip():
@@ -81,7 +88,8 @@ def build_ui(ip):
     def on_click(_event):
         counter["n"] += 1
         note.set_text("Touch: %d" % counter["n"])
-        print("main: Touch %d" % counter["n"])
+        mcp_logbuf.log("main: Touch %d bei x=%d y=%d"
+                       % (counter["n"], box.get_x(), box.get_y()))
 
     try:
         box.add_flag(lv.obj.FLAG.CLICKABLE)
@@ -89,11 +97,22 @@ def build_ui(ip):
         pass
     box.add_event_cb(on_click, lv.EVENT.CLICKED, None)
 
+    # Zusaetzlich auf druchgehende Ereignisse reagieren (auch ohne Klick-Treffer),
+    # damit ein funktionierender Touch sichtbar wird.
+    def on_press(_event):
+        mcp_logbuf.log("main: PRESS-Ereignis")
+
+    try:
+        scr.add_event_cb(on_press, lv.EVENT.PRESSED, None)
+        scr.add_flag(lv.obj.FLAG.CLICKABLE)
+    except Exception:  # noqa: BLE001
+        pass
+
     bar = lv.bar(scr)
     bar.set_size(280, 18)
     bar.align(lv.ALIGN.BOTTOM_MID, 0, -30)
     bar.set_value(60, 0)
-    print("main: UI ok")
+    mcp_logbuf.log("main: UI ok")
 
 
 def main():
@@ -120,18 +139,27 @@ def main():
         except Exception:  # noqa: BLE001
             pass
 
-    # Hauptschleife. Achtung: KeyboardInterrupt NICHT verschlucken -- in MicroPython
-    # erbt es von Exception, und ohne Durchreichen waere das Board per Ctrl-C
-    # (also auch mit mpremote) nicht mehr erreichbar.
+    # Hauptschleife. Zwei Dinge sind hier wesentlich:
+    #
+    # 1. LVGL braucht einen fortlaufenden Zeittakt. Ohne `lv.tick_inc()` bleibt
+    #    `lv.tick_get()` auf 0 stehen und `lv.timer_handler()` fuehrt dann KEINEN
+    #    Timer aus -- Folge: keine Touch-Abfrage, kein Refresh, keine Animation.
+    # 2. KeyboardInterrupt NICHT verschlucken -- in MicroPython erbt es von
+    #    Exception, und ohne Durchreichen waere das Board per Ctrl-C (also auch
+    #    mit mpremote) nicht mehr erreichbar.
+    last_tick = time.ticks_ms()
     while True:
         try:
+            now = time.ticks_ms()
+            lv.tick_inc(time.ticks_diff(now, last_tick))
+            last_tick = now
             lv.timer_handler()
             mcp_screen.service_requests()
         except KeyboardInterrupt:
             raise
         except Exception as exc:  # noqa: BLE001
             print("main: Schleife -- %s: %s" % (type(exc).__name__, exc))
-        time.sleep_ms(20)
+        time.sleep_ms(5)
 
 
 main()

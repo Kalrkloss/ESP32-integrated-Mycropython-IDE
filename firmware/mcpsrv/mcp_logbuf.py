@@ -89,3 +89,15 @@ def install(ring=None):
 
 def logs(clear=False):
     return RING.text(clear=clear)
+
+
+def log(*args, **kwargs):
+    """Fuer Anwendungscode: in den Ringpuffer schreiben UND auf die Konsole.
+
+    Noetig, weil MicroPython-`print` direkt in den C-stdout schreibt -- davon sieht
+    der Ringpuffer (und damit das MCP-Tool `logs`) nichts."""
+    text = kwargs.get("sep", " ").join(str(a) for a in args)
+    if kwargs.get("end", "\n") == "\n":
+        text += "\n"
+    RING.write(text)
+    print(text, end="")
