@@ -14,10 +14,12 @@
 import json
 import os
 
+import display_config
 import mcp_httpd
 import mcp_logbuf
 import mcp_screen
 import mcp_tools
+import portal
 
 ROOT = ""                                     # "" = Geraetewurzel; Host-Test: tmp-Verzeichnis
 CONFIG_FILE = "config.json"                   # WLAN + Anzeige + Geraetename
@@ -98,51 +100,38 @@ STANDARD_CONFIG = {
 
 def _wifi_json_lesen():
     try:
-        with open(ROOT + "/wifi.json") as fh:
+        with open(real_path("/wifi.json")) as fh:
             return json.load(fh)
     except (OSError, ValueError):
         return {}
 
 
 def config_lesen(mit_passwort=False):
-    """Wirksame Konfiguration: wifi.json als Basis, config.json hat Vorrang.
+    """Effective configuration as the web UI sees it.
 
-    Das WLAN-Passwort wird geraeteseitig gebraucht, aber nicht an den Browser
-    zurueckgegeben (`mit_passwort=False`); stattdessen steht dort
-    `password_gesetzt`, damit die Seite anzeigen kann, dass eines hinterlegt ist.
+    Base is display_config.load_config() (profile + config.json). The legacy
+    wifi.json only fills empty fields, with the same rule boot.py uses. The WiFi
+    password is needed on the device but is never handed back to the browser --
+    instead the UI gets `password_gesetzt` so it can show that one is stored.
     """
-    cfg = dict(STANDARD_CONFIG)
-    try:
-        with open(ROOT + "/" + CONFIG_FILE) as fh:
-            cfg.update(json.load(fh))
-    except (OSError, ValueError):
-        pass
-    # wifi.json (Altbestand) fuellt nur Luecken -- es ueberschreibt nichts Gesetztes.
-    # Gleiche Regel wie in boot.py, damit beide dieselbe wirksame Konfiguration sehen.
-    alt = _wifi_json_lesen()
-    for schluessel in ("ssid", "hostname"):
-        if not cfg.get(schluessel) and alt.get(schluessel):
-            cfg[schluessel] = alt[schluessel]
+    display_config.ROOT = ROOT
+    cfg = display_config.load_config()
+    legacy = _wifi_json_lesen()
+    for key in ("ssid", "hostname"):
+        if not cfg.get(key) and legacy.get(key):
+            cfg[key] = legacy[key]
     if not mit_passwort:
-        cfg["password_gesetzt"] = bool(cfg.get("password"))
+        cfg["password_gesetzt"] = bool(cfg.get("password") or legacy.get("password"))
         cfg["password"] = ""
+    elif not cfg.get("password") and legacy.get("password"):
+        cfg["password"] = legacy["password"]
     return cfg
 
 
 def config_schreiben(daten):
-    """Speichern. Ein leeres Passwortfeld loescht kein hinterlegtes Passwort."""
-    alt = config_lesen(mit_passwort=True)
-    cfg = dict(alt)
-    for schluessel in STANDARD_CONFIG:
-        if schluessel not in daten:
-            continue
-        wert = daten[schluessel]
-        if schluessel == "password" and wert == "" and alt.get("password"):
-            continue                      # leer = unveraendert
-        cfg[schluessel] = wert
-    with open(ROOT + "/" + CONFIG_FILE, "w") as fh:
-        json.dump(cfg, fh)
-    return config_lesen()
+    """Store the configuration. An empty password field deletes nothing."""
+    display_config.ROOT = ROOT
+    return config_lesen() if not daten else display_config.save_config(daten)
 
 
 # ---------------------------------------------------------------- API-Handler
@@ -321,6 +310,55 @@ def api_screen(req):
                                           "Cache-Control": "no-store"})
 
 
+def api_drivers(req):
+    """Driver files present on the device -- the basis of the selection lists."""
+    drivers = display_config.available_drivers()
+    drivers["chip"] = display_config.chip_name()
+    return mcp_httpd.json_response(drivers)
+
+
+def api_profiles(req):
+    """Board profiles for this firmware's chip, plus the current configuration."""
+    display_config.ROOT = ROOT
+    return mcp_httpd.json_response({
+        "chip": display_config.chip_name(),
+        "profiles": display_config.load_profiles(),
+        "config": config_lesen(),
+    })
+
+
+def portal_redirect(req):
+    """Captive portal: send every unknown request to the setup page."""
+    return portal.redirect_to_setup(req)
+
+
+def setup_routes():
+    """Restricted route table for setup mode.
+
+    The access point is open, so it serves configuration only: no MCP tools, no
+    code execution, no file access. Every unknown path is redirected to /setup,
+    which is what makes the captive portal work. "GET *" is a prefix route (empty
+    prefix) and is only used after all exact matches failed.
+    """
+    return {
+        "GET /": statisch("setup.html"),
+        "GET /setup": statisch("setup.html"),
+        "GET /setup.js": statisch("setup.js"),
+        "GET /app.css": statisch("app.css"),
+        "GET /favicon.ico": favicon,
+        "GET /api/config": api_config,
+        "POST /api/config": api_config,
+        "GET /api/profiles": api_profiles,
+        "GET /api/drivers": api_drivers,
+        "GET /api/state": api_state,
+        "POST /api/reset": api_reset,
+        "GET *": portal_redirect,
+        "POST *": portal_redirect,
+        "PUT *": portal_redirect,
+        "DELETE *": portal_redirect,
+    }
+
+
 def api_reset(req):
     return mcp_httpd.json_response({"result": mcp_tools.tool_reset(500)})
 
@@ -330,8 +368,12 @@ def build_routes():
         "GET /": statisch("index.html"),
         "GET /ui": statisch("index.html"),
         "GET /index.html": statisch("index.html"),
+        "GET /setup": statisch("setup.html"),
+        "GET /setup.js": statisch("setup.js"),
         "GET /app.css": statisch("app.css"),
         "GET /app.js": statisch("app.js"),
+        "GET /api/drivers": api_drivers,
+        "GET /api/profiles": api_profiles,
         "GET /editor/*": web_baum,          # mitgelieferter Codeeditor (CodeMirror)
         "GET /favicon.ico": favicon,
         "GET /api/state": api_state,

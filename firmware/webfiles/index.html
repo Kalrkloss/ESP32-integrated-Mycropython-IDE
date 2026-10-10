@@ -45,16 +45,19 @@
     </div>
     <div class="card">
       <div class="row">
-        <label for="shot-scale">Vorschau</label>
-        <select id="shot-scale" style="max-width:110px">
+        <label for="shot-scale">Preview</label>
+        <select id="shot-scale" style="max-width:130px">
+          <option value="1" selected>full</option>
           <option value="2">1/2</option>
-          <option value="4" selected>1/4</option>
-          <option value="8">1/8</option>
+          <option value="4">1/4</option>
         </select>
-        <button class="btn" onclick="shot()">Bild holen</button>
+        <button class="btn" onclick="shot()">Grab screen</button>
+        <button class="btn" onclick="liveToggle(this)">Live view</button>
         <span class="muted" id="prev-status"></span>
       </div>
-      <canvas class="prev" id="prev" width="160" height="240"></canvas>
+      <canvas class="prev" id="prev" width="320" height="480"></canvas>
+      <div class="hint">The board sends the raw RGB565 buffer; the browser converts it.
+        Full resolution is faster than downscaling on the device (0.45 s vs 1.2 s).</div>
     </div>
   </section>
 
@@ -105,18 +108,22 @@
   <section id="config">
     <div class="card">
       <div class="row">
-        <div style="flex:1;min-width:200px"><label>WLAN SSID</label><input id="c-ssid"></div>
-        <div style="flex:1;min-width:200px"><label>WLAN Passwort</label><input id="c-pass" type="password"></div>
+        <div style="flex:1;min-width:200px"><label>WiFi SSID</label><input id="c-ssid"></div>
+        <div style="flex:1;min-width:200px"><label>WiFi password</label><input id="c-pass" type="password"></div>
       </div>
       <div class="row" style="margin-top:8px">
-        <div style="flex:1;min-width:180px"><label>Geraetename (Hostname)</label><input id="c-host"></div>
+        <div style="flex:1;min-width:180px"><label>Device name (hostname)</label><input id="c-host"></div>
         <div style="flex:1;min-width:180px">
-          <label>Helligkeit <span id="c-bri-val"></span></label>
+          <label>Brightness <span id="c-bri-val"></span></label>
           <input id="c-bri" type="range" min="0" max="100" step="5">
         </div>
+        <div style="min-width:170px">
+          <label>Board profile</label>
+          <select id="c-board"></select>
+        </div>
         <div style="min-width:140px">
-          <label>Hintergrundlicht</label>
-          <select id="c-bl"><option value="1">an</option><option value="0">aus</option></select>
+          <label>Application</label>
+          <select id="c-app"></select>
         </div>
       </div>
       <div class="row" style="margin-top:10px">

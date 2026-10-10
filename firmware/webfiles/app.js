@@ -142,40 +142,56 @@ function leeren() {
   el("out").textContent = "";
 }
 
-function shot() {
-  var scale = parseInt(el("shot-scale").value, 10) || 4;
-  el("prev-status").textContent = "lade ...";
+function shot(live) {
+  // Full frame and let the browser scale: measured on this board, a full
+  // 320x480 frame takes 0.45 s while scale=4 takes 1.2 s (the device-side
+  // downscale is a pure Python pixel loop and dominates).
+  var scale = live ? 1 : (parseInt(el("shot-scale").value, 10) || 1);
+  el("prev-status").textContent = "loading ...";
   fetch("/screen.raw?scale=" + scale, { cache: "no-store" }).then(function (r) {
     if (!r.ok) {
       throw new Error("HTTP " + r.status);
     }
-    var mass = (r.headers.get("X-Screen") || "").split("x");
-    return r.arrayBuffer().then(function (puffer) {
-      return { puffer: puffer, breite: parseInt(mass[0], 10), hoehe: parseInt(mass[1], 10) };
+    var size = (r.headers.get("X-Screen") || "").split("x");
+    return r.arrayBuffer().then(function (buffer) {
+      return { buffer: buffer, width: parseInt(size[0], 10), height: parseInt(size[1], 10) };
     });
   }).then(function (a) {
-    if (!a.breite || !a.hoehe) {
-      throw new Error("Massangabe fehlt");
+    if (!a.width || !a.height) {
+      throw new Error("missing size header");
     }
-    var leinwand = el("prev");
-    leinwand.width = a.breite;
-    leinwand.height = a.hoehe;
-    var kontext = leinwand.getContext("2d");
-    var bild = kontext.createImageData(a.breite, a.hoehe);
-    var roh = new Uint8Array(a.puffer);
-    var ziel = bild.data;
-    for (var i = 0, p = 0; i + 1 < roh.length; i += 2, p += 4) {
-      var v = roh[i] | (roh[i + 1] << 8);          // RGB565, niederwertiges Byte zuerst
-      ziel[p] = ((v >> 11) & 0x1F) << 3;
-      ziel[p + 1] = ((v >> 5) & 0x3F) << 2;
-      ziel[p + 2] = (v & 0x1F) << 3;
-      ziel[p + 3] = 255;
+    var canvas = el("prev");
+    canvas.width = a.width;
+    canvas.height = a.height;
+    var context = canvas.getContext("2d");
+    var image = context.createImageData(a.width, a.height);
+    var raw = new Uint8Array(a.buffer);
+    var target = image.data;
+    for (var i = 0, p = 0; i + 1 < raw.length; i += 2, p += 4) {
+      var v = raw[i] | (raw[i + 1] << 8);          // RGB565, low byte first
+      target[p] = ((v >> 11) & 0x1F) << 3;
+      target[p + 1] = ((v >> 5) & 0x3F) << 2;
+      target[p + 2] = (v & 0x1F) << 3;
+      target[p + 3] = 255;
     }
-    kontext.putImageData(bild, 0, 0);
-    el("prev-status").textContent = a.breite + " x " + a.hoehe + " (1/" + scale + ")";
+    context.putImageData(image, 0, 0);
+    el("prev-status").textContent = a.width + " x " + a.height + " (1/" + scale + ")";
   }).catch(function (f) {
-    el("prev-status").textContent = "Fehler: " + f;
+    el("prev-status").textContent = "error: " + f;
   });
+}
+
+var liveTimer = null;
+
+function liveToggle(box) {
+  if (liveTimer) {
+    clearInterval(liveTimer);
+    liveTimer = null;
+    el("prev-status").textContent = "live view stopped";
+    return;
+  }
+  liveTimer = setInterval(function () { shot(true); }, 1500);
+  shot(true);
 }
 
 function neuStart() {
@@ -441,14 +457,50 @@ function neuerOrdner() {
 function cfgLaden() {
   api("/api/config").then(function (a) {
     var c = a.config || {};
+    var display = c.display || {};
     el("c-ssid").value = c.ssid || "";
     el("c-pass").value = "";
-    el("c-pass").placeholder = c.password_gesetzt ? "unveraendert lassen" : "kein Passwort gesetzt";
+    el("c-pass").placeholder = c.password_gesetzt ? "leave unchanged" : "no password stored";
     el("c-host").value = c.hostname || "";
-    el("c-bri").value = c.brightness !== undefined ? c.brightness : 70;
-    el("c-bl").value = c.backlight ? "1" : "0";
+    el("c-bri").value = display.brightness !== undefined ? display.brightness : 70;
     el("c-bri-val").textContent = el("c-bri").value + " %";
+    ladeAuswahl(c);
   });
+}
+
+// Board profiles and applications for the two selection lists. Profiles come with
+// their pins; a board's values are applied by the setup page.
+function ladeAuswahl(c) {
+  var board = el("c-board");
+  if (!board.options.length) {
+    api("/api/profiles").then(function (a) {
+      board.innerHTML = (a.profiles || []).map(function (p) {
+        return '<option value="' + p.short + '">' + p.name + "</option>";
+      }).join("");
+      board.value = c.board || "";
+    });
+  } else {
+    board.value = c.board || "";
+  }
+  var app = el("c-app");
+  if (!app.options.length) {
+    api("/api/files?path=/apps").then(function (a) {
+      var names = ["launcher", "demo"];
+      (a.entries || []).forEach(function (entry) {
+        if (entry.name.slice(-3) === ".py") {
+          names.push(entry.name.slice(0, -3));
+        }
+      });
+      app.innerHTML = names.map(function (name) {
+        return '<option value="' + name + '">' + name + "</option>";
+      }).join("");
+      app.value = c.app || "launcher";
+    }).catch(function () {
+      app.innerHTML = '<option value="launcher">launcher</option>';
+    });
+  } else {
+    app.value = c.app || "launcher";
+  }
 }
 
 function cfgSpeichern() {
@@ -459,28 +511,29 @@ function cfgSpeichern() {
       ssid: el("c-ssid").value,
       password: el("c-pass").value,
       hostname: el("c-host").value,
-      brightness: parseInt(el("c-bri").value, 10),
-      backlight: el("c-bl").value === "1"
+      board: el("c-board").value,
+      app: el("c-app").value,
+      configured: true,
+      display: { brightness: parseInt(el("c-bri").value, 10) }
     })
   }).then(function (a) {
-    el("c-status").textContent = a.error ? a.error : "gespeichert (Neustart fuer WLAN/Hostname)";
+    el("c-status").textContent = a.error ? a.error : "saved (restart needed for WiFi/hostname)";
     cfgLaden();
   });
 }
 
 function briJetzt() {
   var w = parseInt(el("c-bri").value, 10);
-  var an = el("c-bl").value === "1";
   var code = "import display_config\n"
            + "d = display_config.LAST_DISPLAY\n"
-           + "d.set_backlight(" + (an ? w : 0) + ")\n"
-           + "print('Helligkeit gesetzt')";
+           + "d.set_backlight(" + w + ")\n"
+           + "print('brightness set')";
   api("/api/exec", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ code: code })
   }).then(function (a) {
-    el("c-status").textContent = "angewendet";
+    el("c-status").textContent = "applied";
     zeige(a.output + "\n");
   });
 }

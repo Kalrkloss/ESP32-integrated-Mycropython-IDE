@@ -35,3 +35,14 @@ a{color:var(--acc)}
 img.prev,canvas.prev{max-width:100%;border:1px solid var(--line);border-radius:8px;background:#000}
 canvas.prev{image-rendering:pixelated;margin-top:10px}
 .hint{font-size:12px;color:var(--dim);margin-top:6px}
+/* setup page (captive portal) */
+.setup{max-width:820px;margin:0 auto;padding:14px}
+.setup section{display:block}
+.setup h2{font-size:14px;margin:0 0 6px}
+.setup h3{font-size:13px;margin:14px 0 6px;color:var(--dim)}
+.setup .row{display:grid;grid-template-columns:minmax(110px,36%) 1fr;gap:8px;align-items:center;margin-bottom:7px}
+.setup .row.actions{display:flex;align-items:center;margin-top:4px}
+.setup label{margin:0}
+.setup .card p{margin:0 0 10px}
+input[type=checkbox]{width:auto;justify-self:start}
+.err{color:var(--bad);font-size:12px;margin-top:6px;white-space:pre-wrap}

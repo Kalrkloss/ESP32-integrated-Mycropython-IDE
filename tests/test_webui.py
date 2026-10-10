@@ -19,8 +19,10 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIRMWARE = os.path.join(os.path.dirname(HERE), "firmware", "mcpsrv")
+DEVICE = os.path.join(os.path.dirname(HERE), "firmware", "device")
 WEBFILES = os.path.join(os.path.dirname(HERE), "firmware", "webfiles")
 sys.path.insert(0, FIRMWARE)
+sys.path.insert(0, DEVICE)          # display_config, portal: device modules
 
 import mcp_httpd as httpd  # noqa: E402
 import mcp_serve as serve  # noqa: E402
@@ -81,7 +83,8 @@ def test_seite():
     ids = set(re.findall(r'id="([^"]+)"', html))
     for name in ("repl", "editor", "files", "config", "out", "cmd", "code", "e-path",
                  "f-rows", "f-path", "upload", "c-ssid", "c-pass", "c-host", "c-bri",
-                 "c-bl", "p-ip", "p-heap", "c-info", "shot-scale", "prev-status"):
+                 "p-ip", "p-heap", "c-info", "shot-scale", "prev-status",
+                 "c-board", "c-app"):
         check("Element #%s vorhanden" % name, name in ids)
     check("Vorschau ist eine Leinwand (kein PNG auf dem Geraet)",
           '<canvas class="prev" id="prev"' in html)
@@ -137,6 +140,32 @@ def test_seite():
     check("keine abgerissenen JS-Zeichenketten", not schlecht, str(schlecht[:2]))
 
 
+def test_setup_seite():
+    print("Setup-Seite")
+    html = read("setup.html")
+    script = read("setup.js")
+    ids = set(re.findall(r'id="([^"]+)"', html))
+    for name in ("ssid", "password", "hostname", "ap_ssid", "ap_password", "board",
+                 "board-info", "form-display", "form-touch", "status", "err", "chip",
+                 "drivers"):
+        check("Element #%s vorhanden" % name, name in ids)
+    check("Setup-Seite laedt das eigene Skript", 'src="/setup.js"' in html)
+    check("Setup-Seite nutzt das gemeinsame Stylesheet", 'href="/app.css"' in html)
+    check("kein CDN in der Setup-Seite", "http://" not in html.replace("http://www.w3.org", ""))
+    check("Setup-Seite kennt die Profil-API", "/api/profiles" in script)
+    check("Setup-Seite kennt die Treiber-API", "/api/drivers" in script)
+    check("Setup-Seite speichert ueber die API", '"/api/config"' in script)
+    check("Setup-Seite kann neu starten", '"/api/reset"' in script)
+    check("Setup-Seite fordert eine SSID",
+          "WiFi name is required" in script)
+    check("keine deutschen Umlaute in der Setup-Seite",
+          not set("äöüÄÖÜß") & set(html + script))
+    check("Setup-Syntax ok (node)", js_syntax(os.path.join(WEBFILES, "setup.js")))
+    check("Setup-CSS vorhanden", ".setup" in read("app.css"))
+    check("Hauptseite verlinkt die Einrichtung",
+          "setup" in read("app.js").lower() or "setup" in read("index.html").lower())
+
+
 def test_routen():
     print("Routen")
     routen = webui.build_routes()
@@ -144,11 +173,28 @@ def test_routen():
                        "GET /api/files", "GET /api/file", "POST /api/file",
                        "DELETE /api/file", "POST /api/mkdir", "POST /api/rename",
                        "GET /api/config", "POST /api/config", "GET /api/screen.png",
-                       "POST /api/reset", "GET /status", "GET /editor/*"):
+                       "POST /api/reset", "GET /status", "GET /editor/*",
+                       "GET /setup", "GET /setup.js", "GET /api/profiles",
+                       "GET /api/drivers"):
         check("Route %s" % schluessel, schluessel in routen)
     _, server = serve.build_server(port=0)
     check("Weboberflaeche haengt im Server", "GET /api/files" in server.routes)
     check("Klartext-Status bleibt", "GET /status" in server.routes)
+
+    # Setup mode serves configuration only: no MCP, no code execution, no files.
+    einrichten = webui.setup_routes()
+    check("Setup-Route vorhanden", "GET /setup" in einrichten)
+    check("Setup ohne Codeausfuehrung", "POST /api/exec" not in einrichten)
+    check("Setup ohne MCP", "POST /mcp" not in einrichten)
+    check("Setup ohne Dateizugriff", "GET /api/files" not in einrichten)
+    _, setup_server = serve.build_server(port=0, setup_only=True)
+    finde_setup = setup_server._find_handler
+    check("Setup-Modus liefert die Konfigseite",
+          finde_setup("GET", "/") is not None and finde_setup("GET", "/setup") is not None)
+    check("Setup-Modus leitet Unbekanntes um", finde_setup("GET", "/generate_204") is not None)
+    check("Setup-Modus leitet Codeausfuehrung um statt sie auszufuehren",
+          finde_setup("POST", "/api/exec") is webui.portal_redirect)
+    check("Setup-Modus leitet Dateizugriff um", finde_setup("GET", "/api/files") is webui.portal_redirect)
 
     # Praefix-Routen (Schluessel endet auf "*") aufloesen
     finde = server._find_handler
@@ -246,18 +292,30 @@ def test_konfiguration(tmp):
     print("Konfiguration")
     start = webui.config_lesen()
     check("Standardwerte vorhanden",
-          start["hostname"] == "esp32-debug" and start["brightness"] == 70)
+          start["hostname"] == "esp32-debug" and start["display"]["brightness"] == 70)
+    check("Display- und Touch-Abschnitt vorhanden",
+          "driver" in start["display"] and "driver" in start["touch"])
     antwort = json.loads(text_of(webui.api_config(req("POST", "/api/config", {}, json.dumps(
         {"ssid": "Netz", "password": "Geheim", "hostname": "brett", "brightness": 30,
-         "backlight": False, "unbekannt": "ignoriert"}).encode()))))
+         "unbekannt": "ignoriert"}).encode()))))
     check("Speichern liefert Konfiguration", antwort["config"]["ssid"] == "Netz")
     check("unbekannter Schluessel ignoriert", "unbekannt" not in antwort["config"])
     danach = webui.config_lesen()
     check("Werte bleiben erhalten",
-          danach["hostname"] == "brett" and danach["brightness"] == 30 and danach["backlight"] is False)
+          danach["hostname"] == "brett" and danach["display"]["brightness"] == 30)
     check("Datei liegt auf dem Geraet", os.path.exists(os.path.join(tmp, "config.json")))
     check("Lesen ueber GET",
           json.loads(text_of(webui.api_config(req("GET", "/api/config"))))["config"]["ssid"] == "Netz")
+    # Display/Touch sections are merged field by field, a profile provides the base.
+    webui.config_schreiben({"board": "JC3248W535", "display": {"brightness": 42},
+                            "touch": {"scl": 7}})
+    nach_profil = webui.config_lesen()
+    check("Profil liefert Pins", nach_profil["display"]["sck"] == 47,
+          str(nach_profil["display"].get("sck")))
+    check("eigener Wert gewinnt", nach_profil["display"]["brightness"] == 42)
+    check("nicht genannte Felder bleiben", nach_profil["display"]["width"] == 320)
+    check("Touch-Abschnitt gemischt",
+          nach_profil["touch"]["scl"] == 7 and nach_profil["touch"]["sda"] == 4)
     # Passwort darf nie an den Browser gehen -- aber auch nicht verloren gehen.
     sichtbar = json.loads(text_of(webui.api_config(req("GET", "/api/config"))))["config"]
     check("Passwort wird nicht ausgeliefert", sichtbar["password"] == "")
@@ -275,9 +333,53 @@ def test_konfiguration(tmp):
     wirksam = webui.config_lesen()
     check("leere SSID -> wifi.json liefert sie", wirksam["ssid"] == "Alt-Netz", wirksam["ssid"])
     check("gesetzter Hostname gewinnt", wirksam["hostname"] == "brett3", wirksam["hostname"])
-    check("Helligkeit bleibt erhalten", wirksam["brightness"] == 40)
+    check("Helligkeit bleibt erhalten", wirksam["display"]["brightness"] == 40)
     check("Altbestand-Passwort bleibt nutzbar",
           webui.config_lesen(mit_passwort=True)["password"] == "Neu")
+    # A profile only provides the fields that were never stored explicitly.
+    os.remove(os.path.join(tmp, "config.json"))
+    webui.config_schreiben({"board": "CUSTOM"})
+    check("Profil liefert den Treiber, solange nichts Eigenes gespeichert ist",
+          webui.config_lesen()["display"]["driver"] == "st7789",
+          webui.config_lesen()["display"]["driver"])
+    check("nach dem Loeschen greift wieder der Altbestand",
+          webui.config_lesen(mit_passwort=True)["password"] == "Alt-Geheim",
+          webui.config_lesen(mit_passwort=True)["password"])
+    # Profile and driver lists feed the setup page
+    display_config = sys.modules["display_config"]
+    echt_chip = display_config.chip_name
+    display_config.chip_name = lambda: "esp32s3"     # host runs on x86_64
+    try:
+        profile = json.loads(text_of(webui.api_profiles(req("GET", "/api/profiles"))))
+        check("Profile fuer diesen Chip",
+              len(profile["profiles"]) >= 2
+              and all(p["chip"] == profile["chip"] for p in profile["profiles"]),
+              str(profile.get("chip")))
+        check("Profil enthaelt Pins", "display" in profile["profiles"][0])
+        check("Chip-Typ wird mitgeliefert", profile["chip"] == "esp32s3")
+    finally:
+        display_config.chip_name = echt_chip
+    treiber = json.loads(text_of(webui.api_drivers(req("GET", "/api/drivers"))))
+    check("Treiberlisten vorhanden",
+          isinstance(treiber["display"], list) and isinstance(treiber["touch"], list))
+    # Device-only trap: this MicroPython build has no os.path. Emulate that on the
+    # host, otherwise the bug only shows up on the board.
+    import types
+    ohne_pfad = types.ModuleType("os")
+    for name in ("listdir", "stat", "mkdir", "remove", "rename", "rmdir", "uname"):
+        if hasattr(os, name):
+            setattr(ohne_pfad, name, getattr(os, name))
+    echt_os = display_config.os
+    display_config.os = ohne_pfad
+    try:
+        treiber = display_config.available_drivers()
+        check("Treiberliste ohne os.path",
+              isinstance(treiber["display"], list) and isinstance(treiber["touch"], list),
+              str(treiber))
+        check("Treiber aus /drv werden gefunden", "axs15231b" in treiber["display"]
+              or not treiber["display"], str(treiber["display"][:3]))
+    finally:
+        display_config.os = echt_os
 
 
 def test_exec():
@@ -336,7 +438,8 @@ def test_httppfad(tmp):
           kopf.startswith("HTTP/1.1 200") and "entries" in json.loads(koerper.decode()))
 
     kopf, koerper = hole("/api/config", "POST", b'{"brightness": 55}')
-    check("POST /api/config speichert", json.loads(koerper.decode())["config"]["brightness"] == 55)
+    check("POST /api/config speichert",
+          json.loads(koerper.decode())["config"]["display"]["brightness"] == 55)
 
     kopf, koerper = hole("/api/file?path=/http.txt", "POST", b"ueber http")
     check("POST /api/file schreibt", json.loads(koerper.decode())["ok"])
@@ -383,8 +486,14 @@ def main():
     shutil.copytree(WEBFILES, os.path.join(tmp, "web"))
     alt = webui.ROOT
     webui.ROOT = tmp
+    display_config = sys.modules["display_config"]
+    alt_profile = display_config.PROFILES_FILE
+    # profiles.json ships with the firmware and is not part of the writable area.
+    display_config.PROFILES_FILE = os.path.join(os.path.dirname(HERE), "firmware", "device",
+                                                "profiles.json")
     try:
         test_seite()
+        test_setup_seite()
         test_routen()
         test_dateien(tmp)
         test_konfiguration(tmp)
@@ -392,6 +501,7 @@ def main():
         test_httppfad(tmp)
     finally:
         webui.ROOT = alt
+        display_config.PROFILES_FILE = alt_profile
         shutil.rmtree(tmp, ignore_errors=True)
     print()
     if FAILURES:

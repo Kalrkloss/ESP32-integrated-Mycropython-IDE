@@ -30,8 +30,13 @@ INSTRUCTIONS = (
 )
 
 
-def build_server(port=PORT):
-    """Baut MCP-Server + Router. Auch hostseitig nutzbar (ohne Hardware)."""
+def build_server(port=PORT, setup_only=False):
+    """Baut MCP-Server + Router. Auch hostseitig nutzbar (ohne Hardware).
+
+    setup_only: Nur die Einrichtungsseite ausliefern (offener Zugangspunkt!).
+    Dann gibt es weder MCP-Tools noch Codeausfuehrung noch Dateizugriff -- wer im
+    offenen WLAN sitzt, soll ausschliesslich die Konfiguration aendern koennen.
+    """
     mcp_logbuf.install()
     mcp = mcp_protocol.McpServer(mcp_tools.build_tools(), server_name=SERVER_NAME,
                                  server_version=SERVER_VERSION, instructions=INSTRUCTIONS)
@@ -60,10 +65,13 @@ def build_server(port=PORT):
             return resp
         return mcp_httpd.text(200, payload, "application/json", headers)
 
-    routes = mcp_tools.build_routes(mcp_handler)
-    # Die Weboberflaeche uebernimmt "/" (Konsole, Editor, Dateimanager, Konfiguration);
-    # der Klartext-Status liegt weiterhin unter "/status".
-    routes.update(mcp_webui.build_routes())
+    if setup_only:
+        routes = mcp_webui.setup_routes()
+    else:
+        routes = mcp_tools.build_routes(mcp_handler)
+        # Die Weboberflaeche uebernimmt "/" (Konsole, Editor, Dateimanager,
+        # Konfiguration); der Klartext-Status liegt weiterhin unter "/status".
+        routes.update(mcp_webui.build_routes())
     # Fehler in Handlern in den Logring schreiben -- sonst verschwinden sie spurlos.
     return mcp, mcp_httpd.HttpServer(
         routes, port=port,
@@ -94,12 +102,13 @@ def _aufsicht(server):
             time.sleep(1)
 
 
-def start(port=PORT):
-    mcp, server = build_server(port=port)
+def start(port=PORT, setup_only=False):
+    mcp, server = build_server(port=port, setup_only=setup_only)
     server._open()
     if not mcp_httpd.start_worker(_aufsicht, (server,)):
-        raise RuntimeError("kein _thread-Modul -- Server kann nicht starten")
-    print("MCP-Debug-Server laeuft auf Port %d (%d Tools)" % (port, len(mcp.tools)))
+        raise RuntimeError("no _thread module -- server cannot start")
+    print("debug server on port %d (%d tools%s)"
+          % (port, len(mcp.tools), ", setup mode" if setup_only else ""))
     return mcp, server
 
 

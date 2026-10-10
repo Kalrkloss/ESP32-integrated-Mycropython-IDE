@@ -39,39 +39,44 @@ def main():
     sys.path.insert(0, DEVICE)
     try:
         import boot
+        import portal
 
-        # nur wifi.json vorhanden
+        # only wifi.json present
         schreibe("wifi.json", {"ssid": "Alt", "password": "Alt-PW", "hostname": "alt-name"})
-        cfg = boot._load_config()
+        cfg = boot.load_credentials()
         check("wifi.json allein wird gelesen", cfg and cfg["ssid"] == "Alt", str(cfg))
         check("Passwort kommt mit", cfg["password"] == "Alt-PW")
 
-        # config.json ohne SSID -> wifi.json fuellt
+        # config.json without SSID -> wifi.json fills in
         schreibe("config.json", {"ssid": "", "password": "", "brightness": 55})
-        cfg = boot._load_config()
+        cfg = boot.load_credentials()
         check("leere SSID -> Altbestand greift", cfg and cfg["ssid"] == "Alt", str(cfg))
         check("leeres Passwort -> Altbestand greift", cfg["password"] == "Alt-PW")
 
-        # config.json mit SSID -> gewinnt
+        # config.json with SSID -> wins
         schreibe("config.json", {"ssid": "Neu", "password": "Neu-PW", "hostname": "neu-name"})
-        cfg = boot._load_config()
+        cfg = boot.load_credentials()
         check("config.json gewinnt bei SSID", cfg["ssid"] == "Neu")
         check("config.json gewinnt bei Hostname", cfg["hostname"] == "neu-name")
         check("config.json gewinnt bei Passwort", cfg["password"] == "Neu-PW")
 
-        # kaputte Datei darf den Start nicht verhindern
+        # broken file must not prevent startup
         with open("config.json", "w") as fh:
             fh.write("{kaputt")
-        cfg = boot._load_config()
+        cfg = boot.load_credentials()
         check("kaputte config.json wird uebersprungen", cfg and cfg["ssid"] == "Alt", str(cfg))
 
         os.remove("config.json")
         os.remove("wifi.json")
-        check("ohne Dateien kein WLAN", boot._load_config() is None)
+        check("ohne Dateien keine Zugangsdaten", boot.load_credentials() == {})
 
-        # connect darf ohne WLAN-Modul nicht abstuerzen (Host-Test)
+        # connect must not crash without a WiFi module (host test); a failed
+        # connection opens the setup access point so the board stays reachable.
         check("connect ohne Modul liefert False", boot.connect({"ssid": "x"}) is False)
         check("connect ohne Konfiguration liefert False", boot.connect(None) is False)
+        check("unconfigured board is in setup mode", portal.SETUP_MODE is True)
+        check("unconfigured board has no credentials",
+              not portal.is_configured(boot.load_credentials()))
     finally:
         os.chdir(alt)
         shutil.rmtree(tmp, ignore_errors=True)

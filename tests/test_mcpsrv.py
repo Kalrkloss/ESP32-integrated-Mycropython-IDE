@@ -15,7 +15,9 @@ import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIRMWARE = os.path.join(os.path.dirname(HERE), "firmware", "mcpsrv")
+DEVICE = os.path.join(os.path.dirname(HERE), "firmware", "device")
 sys.path.insert(0, FIRMWARE)
+sys.path.insert(0, DEVICE)          # display_config, portal: device modules
 
 import mcp_png as png  # noqa: E402
 import mcp_protocol as protocol  # noqa: E402

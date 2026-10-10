@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32 setup</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header>
+  <span class="dot"></span>
+  <h1>ESP32 board setup</h1>
+  <span class="muted" id="chip">-</span>
+</header>
+
+<main class="setup">
+  <section class="card">
+    <h2>1. Network</h2>
+    <p class="muted">The board is not configured yet, so it opened this open access
+      point. Enter the WiFi it should join; after a restart it connects there and this
+      page is reachable at its normal address. If it cannot connect, it re-opens the
+      access point.</p>
+    <div class="row"><label for="ssid">WiFi name (SSID)</label>
+      <input id="ssid" type="text" autocomplete="off" placeholder="my-network"></div>
+    <div class="row"><label for="password">WiFi password</label>
+      <input id="password" type="password" autocomplete="off" placeholder="unchanged"></div>
+    <div class="row"><label for="hostname">Device name</label>
+      <input id="hostname" type="text" autocomplete="off" placeholder="esp32-debug"></div>
+    <div class="row"><label for="ap_ssid">Access point name</label>
+      <input id="ap_ssid" type="text" autocomplete="off" placeholder="ESP32-Setup"></div>
+    <div class="row"><label for="ap_password">Access point password</label>
+      <input id="ap_password" type="password" autocomplete="off" placeholder="open"></div>
+  </section>
+
+  <section class="card">
+    <h2>2. Board</h2>
+    <p class="muted">Only boards whose ESP32 type matches this firmware are listed:
+      a firmware image is built for exactly one chip.</p>
+    <div class="row"><label for="board">Board profile</label>
+      <select id="board" onchange="applyProfile()"></select></div>
+    <p class="muted" id="board-info"></p>
+  </section>
+
+  <section class="card">
+    <h2>3. Display and touch</h2>
+    <p class="muted">Values from the profile are pre-filled. Wrong pins can put the
+      panel into boot mode -- if it stays dark, open this page again and correct them
+      (the access point comes up before the display is touched).</p>
+    <h3>Display</h3>
+    <div id="form-display" class="form"></div>
+    <h3>Touch</h3>
+    <div id="form-touch" class="form"></div>
+  </section>
+
+  <section class="card">
+    <h2>4. Save</h2>
+    <div class="row actions">
+      <button class="btn" onclick="save(false)">Save</button>
+      <button class="btn" onclick="save(true)">Save and restart</button>
+      <span class="muted" id="status"></span>
+    </div>
+    <p class="muted" id="drivers"></p>
+    <div class="err" id="err"></div>
+  </section>
+</main>
+
+<script src="/setup.js"></script>
+</body>
+</html>

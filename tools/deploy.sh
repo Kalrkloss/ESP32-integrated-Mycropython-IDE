@@ -34,27 +34,72 @@ case "${1:-all}" in
   mods)
     echo "== Server-Module =="
     mp fs cp "$REPO"/firmware/mcpsrv/mcp_*.py :
-    echo "== Treiber =="
+    echo "== Treiber (flach, Altbestand) =="
     mp fs cp "$REPO"/firmware/device/drivers/*.py :
     ;;
   all|code)
     echo "== Server-Module =="
     mp fs cp "$REPO"/firmware/mcpsrv/mcp_*.py :
-    echo "== Treiber =="
+    echo "== Treiber (flach, Altbestand) =="
     mp fs cp "$REPO"/firmware/device/drivers/*.py :
     echo "== Weboberflaeche =="
     mp fs mkdir :web 2>/dev/null || true
-    mp fs cp "$REPO"/firmware/webfiles/index.html "$REPO"/firmware/webfiles/app.css "$REPO"/firmware/webfiles/app.js :web/
+    mp fs cp "$REPO"/firmware/webfiles/index.html "$REPO"/firmware/webfiles/setup.html "$REPO"/firmware/webfiles/app.css "$REPO"/firmware/webfiles/app.js "$REPO"/firmware/webfiles/setup.js :web/
     mp fs cp -r "$REPO"/firmware/webfiles/editor :web/
     echo "== App =="
-    mp fs cp "$REPO"/firmware/device/main.py "$REPO"/firmware/device/display_config.py :
+    mp fs cp "$REPO"/firmware/device/main.py "$REPO"/firmware/device/display_config.py \
+              "$REPO"/firmware/device/portal.py "$REPO"/firmware/device/profiles.json :
     if [ -f "$REPO"/firmware/device/wifi.json ]; then
       mp fs cp "$REPO"/firmware/device/wifi.json :
     else
       echo "Hinweis: firmware/device/wifi.json fehlt -- Board kommt ohne WLAN hoch." >&2
     fi
+    echo "== Beispiel-Apps =="
+    if [ -d "$REPO"/firmware/apps ] && ls "$REPO"/firmware/apps/*.py >/dev/null 2>&1; then
+      mp fs mkdir :apps 2>/dev/null || true
+      mp fs cp "$REPO"/firmware/apps/*.py :apps/
+      [ -f "$REPO"/firmware/device/app_loader.py ] && mp fs cp "$REPO"/firmware/device/app_loader.py :
+    else
+      echo "Hinweis: firmware/apps fehlt -- keine Beispiel-Apps auf dem Board." >&2
+    fi
     echo "== boot.py (zuletzt: aktiv ab dem naechsten Reset) =="
     mp fs cp "$REPO"/firmware/device/boot.py :
+    ;;
+  drv)
+    echo "== Treiber nach /drv (Auswahl zur Laufzeit) =="
+    mp fs mkdir :drv 2>/dev/null || true
+    mp fs mkdir :drv/display :drv/indev 2>/dev/null || true
+    for dir in "$REPO"/firmware/device/drv/display/*/; do
+      name="$(basename "$dir")"
+      mp fs mkdir ":drv/display/$name" 2>/dev/null || true
+      mp fs cp "$dir"*.py ":drv/display/$name/"
+      echo "   $name"
+    done
+    mp fs cp "$REPO"/firmware/device/drv/indev/*.py :drv/indev/
+    echo "   Touch-Treiber: $(ls "$REPO"/firmware/device/drv/indev | wc -l)"
+    ;;
+  drv-one)
+    [ -n "${2:-}" ] || die "Aufruf: $0 drv-one <name>"
+    name="$2"
+    mp fs mkdir :drv 2>/dev/null || true
+    mp fs mkdir :drv/display 2>/dev/null || true
+    mp fs mkdir :drv/indev 2>/dev/null || true
+    if [ -d "$REPO/firmware/device/drv/display/$name" ]; then
+      mp fs mkdir ":drv/display/$name" 2>/dev/null || true
+      mp fs cp "$REPO"/firmware/device/drv/display/"$name"/*.py ":drv/display/$name/"
+      echo "Anzeige-Treiber $name kopiert"
+    elif [ -f "$REPO/firmware/device/drv/indev/$name.py" ]; then
+      mp fs cp "$REPO"/firmware/device/drv/indev/"$name".py :drv/indev/
+      echo "Touch-Treiber $name kopiert"
+    else
+      die "Treiber $name nicht gefunden"
+    fi
+    ;;
+  apps)
+    [ -d "$REPO"/firmware/apps ] || die "firmware/apps fehlt"
+    mp fs mkdir :apps 2>/dev/null || true
+    mp fs cp "$REPO"/firmware/apps/*.py :apps/
+    [ -f "$REPO"/firmware/device/app_loader.py ] && mp fs cp "$REPO"/firmware/device/app_loader.py :
     ;;
   test)
     echo "== Bring-up-Test auf dem Board =="
@@ -68,7 +113,7 @@ case "${1:-all}" in
   web)
     echo "== Weboberflaeche (HTML/CSS/JS + Editor) =="
     mp fs mkdir :web 2>/dev/null || true
-    mp fs cp "$REPO"/firmware/webfiles/index.html "$REPO"/firmware/webfiles/app.css "$REPO"/firmware/webfiles/app.js :web/
+    mp fs cp "$REPO"/firmware/webfiles/index.html "$REPO"/firmware/webfiles/setup.html "$REPO"/firmware/webfiles/app.css "$REPO"/firmware/webfiles/app.js "$REPO"/firmware/webfiles/setup.js :web/
     mp fs cp -r "$REPO"/firmware/webfiles/editor :web/
     ;;
   ls)
@@ -99,11 +144,15 @@ case "${1:-all}" in
     ;;
   *)
     cat <<EOF
-Aufruf: $0 {mods|all|test|lib|web|ls|rm <datei>|reset|run <datei.py>|exec <python>|repl}
+Aufruf: $0 {mods|all|test|lib|web|drv|drv-one <name>|apps|ls|rm <datei>|reset|run <datei.py>|exec <python>|repl}
 
   mods    Server-Module + Treiber kopieren (fuer den Bring-up, ohne main.py)
-  all     wie mods, zusaetzlich Weboberflaeche, main.py, wifi.json und boot.py
+  all     wie mods, zusaetzlich Weboberflaeche, main.py, portal.py, profiles.json,
+          Beispiel-Apps und boot.py
   web     nur die Weboberflaeche (HTML/CSS/JS + Editor) nach /web kopieren
+  drv     alle Treiber nach /drv kopieren (Auswahl zur Laufzeit, ~1 MB)
+  drv-one einen einzelnen Treiber nach /drv kopieren
+  apps    nur die Beispiel-Apps nach /apps kopieren (plus app_loader.py)
   test    test_screen.py hochladen und auf dem Board ausfuehren (Panel-Bring-up)
   lib     nur die eigenen Treiber kopieren
   ls      Dateien auf dem Board auflisten
