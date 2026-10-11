@@ -1,7 +1,7 @@
-"""Host-Test fuer boot.py: Zusammenfuehrung der Zugangsdaten.
+"""Host test for boot.py: merging of the credentials.
 
-Wichtig, weil ein Fehler hier das Board vom Netz trennt -- und dann ist auch der
-Debug-Server nicht mehr erreichbar. Aufruf: python3 tests/test_boot.py
+Important, because a mistake here cuts the board off the network -- and then the
+debug server is no longer reachable either. Run: python3 tests/test_boot.py
 """
 
 import json
@@ -27,14 +27,14 @@ def check(name, condition, detail=""):
         FAILURES.append(name)
 
 
-def schreibe(name, daten):
+def write(name, data):
     with open(name, "w") as fh:
-        json.dump(daten, fh)
+        json.dump(data, fh)
 
 
 def main():
     tmp = tempfile.mkdtemp(prefix="boot-test-")
-    alt = os.getcwd()
+    old = os.getcwd()
     os.chdir(tmp)
     sys.path.insert(0, DEVICE)
     try:
@@ -42,52 +42,52 @@ def main():
         import portal
 
         # only wifi.json present
-        schreibe("wifi.json", {"ssid": "Alt", "password": "Alt-PW", "hostname": "alt-name"})
+        write("wifi.json", {"ssid": "Old", "password": "Old-PW", "hostname": "old-name"})
         cfg = boot.load_credentials()
-        check("wifi.json allein wird gelesen", cfg and cfg["ssid"] == "Alt", str(cfg))
-        check("Passwort kommt mit", cfg["password"] == "Alt-PW")
+        check("wifi.json alone is read", cfg and cfg["ssid"] == "Old", str(cfg))
+        check("password is included", cfg["password"] == "Old-PW")
 
         # config.json without SSID -> wifi.json fills in
-        schreibe("config.json", {"ssid": "", "password": "", "brightness": 55})
+        write("config.json", {"ssid": "", "password": "", "brightness": 55})
         cfg = boot.load_credentials()
-        check("leere SSID -> Altbestand greift", cfg and cfg["ssid"] == "Alt", str(cfg))
-        check("leeres Passwort -> Altbestand greift", cfg["password"] == "Alt-PW")
+        check("empty SSID -> legacy data applies", cfg and cfg["ssid"] == "Old", str(cfg))
+        check("empty password -> legacy data applies", cfg["password"] == "Old-PW")
 
         # config.json with SSID -> wins
-        schreibe("config.json", {"ssid": "Neu", "password": "Neu-PW", "hostname": "neu-name"})
+        write("config.json", {"ssid": "New", "password": "New-PW", "hostname": "new-name"})
         cfg = boot.load_credentials()
-        check("config.json gewinnt bei SSID", cfg["ssid"] == "Neu")
-        check("config.json gewinnt bei Hostname", cfg["hostname"] == "neu-name")
-        check("config.json gewinnt bei Passwort", cfg["password"] == "Neu-PW")
+        check("config.json wins for SSID", cfg["ssid"] == "New")
+        check("config.json wins for hostname", cfg["hostname"] == "new-name")
+        check("config.json wins for password", cfg["password"] == "New-PW")
 
         # broken file must not prevent startup
         with open("config.json", "w") as fh:
-            fh.write("{kaputt")
+            fh.write("{broken")
         cfg = boot.load_credentials()
-        check("kaputte config.json wird uebersprungen", cfg and cfg["ssid"] == "Alt", str(cfg))
+        check("broken config.json is skipped", cfg and cfg["ssid"] == "Old", str(cfg))
 
         os.remove("config.json")
         os.remove("wifi.json")
-        check("ohne Dateien keine Zugangsdaten", boot.load_credentials() == {})
+        check("no credentials without files", boot.load_credentials() == {})
 
         # connect must not crash without a WiFi module (host test); a failed
         # connection opens the setup access point so the board stays reachable.
-        check("connect ohne Modul liefert False", boot.connect({"ssid": "x"}) is False)
-        check("connect ohne Konfiguration liefert False", boot.connect(None) is False)
+        check("connect without module returns False", boot.connect({"ssid": "x"}) is False)
+        check("connect without configuration returns False", boot.connect(None) is False)
         check("unconfigured board is in setup mode", portal.SETUP_MODE is True)
         check("unconfigured board has no credentials",
               not portal.is_configured(boot.load_credentials()))
     finally:
-        os.chdir(alt)
+        os.chdir(old)
         shutil.rmtree(tmp, ignore_errors=True)
 
     print()
     if FAILURES:
-        print("%d von %d Pruefungen fehlgeschlagen:" % (len(FAILURES), CHECKS[0]))
+        print("%d of %d checks failed:" % (len(FAILURES), CHECKS[0]))
         for name in FAILURES:
             print("   - %s" % name)
         return 1
-    print("alle %d Pruefungen bestanden" % CHECKS[0])
+    print("all %d checks passed" % CHECKS[0])
     return 0
 
 

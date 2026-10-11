@@ -1,82 +1,82 @@
-# Weg C: MicroPython + LVGL als Basis für ein „Annex-ähnliches" System
+# Way C: MicroPython + LVGL as the basis for an "Annex-like" system
 
-Frage: Wie viel Aufwand ist es, auf Basis von MicroPython + LVGL eine Firmware mit
-Webserver, WebREPL, Web-Editor und Config-Page für verschiedene Boards und
-Custom-Display-/Pin-Konfiguration zu bauen?
+Question: how much effort is it to build, on the basis of MicroPython + LVGL, a firmware with
+web server, WebREPL, web editor and config page for various boards and
+custom display/pin configuration?
 
-Kurz: deutlich weniger als ein eigener BASIC-Interpreter, weil ein großer Teil des
-Systems schon existiert. Aufwändig bleiben genau die Teile, die Annex auch selbst
-gebaut hat: Web-Editor-UI, Config-UI, Board-/Display-Matrix und der USB-Audio-Treiber.
+Short answer: considerably less than a custom BASIC interpreter, because a large part of the
+system already exists. Effortful remain exactly those parts that Annex also built
+itself: web editor UI, config UI, board/display matrix and the USB audio driver.
 
-Stand der geprüften Bausteine: 2026-10-10.
+Status of the examined building blocks: 2026-10-10.
 
-## Was MicroPython mitbringt (kein Aufwand)
+## What MicroPython brings (no effort)
 
-| Baustein | Quelle | Anmerkung |
+| Building block | Source | Note |
 |---|---|---|
-| REPL über UART **und** native USB | esp32-Port | auf dem S3 als USB-Serial-JTAG-Konsole |
-| WebREPL (REPL im Browser + Dateitransfer) | `webrepl`-Modul, im Standard-Build | `webrepl.html` wird vom Gerät geliefert; Passwortschutz eingebaut |
-| Dateisystem, `os`, frozen bytecode, `mip` (Paketmanager) | MicroPython-Kern | Annex hat dafür eigene Datei-/OTA-Logik |
-| WLAN, Sockets, TLS, `asyncio`, `_thread` (echte FreeRTOS-Tasks) | MicroPython-Kern | `_thread` ist der Grund, warum „Task einhängen" **hier** funktioniert: wir besitzen den Build |
-| Board-System mit Varianten für Flash-Größe/PSRAM | `ports/esp32/boards/*`, `mpconfigboard.cmake`, `pins.csv` | inkl. `ESP32_GENERIC_S3` mit `SPIRAM_OCT` |
-| LVGL-Bindings + Display-Treiber | <https://github.com/lvgl/lv_micropython> | `lvgl`-Modul in Python, `lcd_bus`, `task_handler` |
-| Lizenzen | MicroPython MIT, LVGL MIT, Microdot MIT, ViperIDE MIT, Espressif-Komponenten Apache-2.0 | kein Lizenzproblem — anders als bei Annex |
+| REPL over UART **and** native USB | esp32 port | on the S3 as a USB-Serial-JTAG console |
+| WebREPL (REPL in the browser + file transfer) | `webrepl` module, in the standard build | `webrepl.html` is delivered by the device; password protection built in |
+| File system, `os`, frozen bytecode, `mip` (package manager) | MicroPython core | Annex has its own file/OTA logic for this |
+| WLAN, sockets, TLS, `asyncio`, `_thread` (real FreeRTOS tasks) | MicroPython core | `_thread` is the reason why "hook in a task" works **here**: we own the build |
+| Board system with variants for flash size/PSRAM | `ports/esp32/boards/*`, `mpconfigboard.cmake`, `pins.csv` | incl. `ESP32_GENERIC_S3` with `SPIRAM_OCT` |
+| LVGL bindings + display drivers | <https://github.com/lvgl/lv_micropython> | `lvgl` module in Python, `lcd_bus`, `task_handler` |
+| Licenses | MicroPython MIT, LVGL MIT, Microdot MIT, ViperIDE MIT, Espressif components Apache-2.0 | no license problem — unlike with Annex |
 
-Aufwand für das Skelett auf dem S3: **unter einem Tag** (IDF v5.5.5 + MicroPython,
+Effort for the skeleton on the S3: **under one day** (IDF v5.5.5 + MicroPython,
 `make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT`).
 
-## Was man selbst bauen muss (Schätzung, Vollzeit, eine Person)
+## What one must build oneself (estimate, full time, one person)
 
-| Baustein | Aufwand | Anmerkung |
+| Building block | Effort | Note |
 |---|---|---|
-| Webserver + Config-Page (WLAN-Scan/Connect, Pin-Belegung, Modul-/Panel-Auswahl, Neustart, Safe-Mode); Config als JSON in Flash | 3–6 Tage | [Microdot](https://github.com/miguelgrinberg/microdot) (Flask-artig, async, MIT) deckt Routing, WebSocket und Auth ab |
-| Web-Editor | 1–3 Tage mit [ViperIDE](https://github.com/vshymanskyy/ViperIDE) (MIT, verbindet sich per WebREPL/USB, Dateimanager + Paketmanager + Terminal); selbst gebaut: 7–12 Tage | der Editor ist der größte Einzelposten, wenn man ihn selbst schreibt |
-| LVGL-Build + erstes Display (SPI-TFT + Touch), Speicher-Tuning | 3–7 Tage | PSRAM praktisch Pflicht |
-| jede weitere Board-Variante | 0,5–2 Tage je Definition | Pins, `sdkconfig`, Flash-/PSRAM-Variante, Deploy-Anleitung |
-| RGB-/Parallel-Panels, weitere Panel-Typen | 3–8 Tage je Panel-Typ | Panel-Timings, `esp_lcd`, PSRAM-Anbindung |
-| Laufzeit-Konfiguration von Displays (ein Image für viele Panels) | 5–10 Tage | Panel-Timings und Bus als Daten statt Compile-Zeit-Konstante — Annex macht das **nicht**, dort wird pro Modul eine eigene Firmware geflasht |
-| **USB-Audio (UAC-Host) als C-Modul** | 4–8 Tage | eigenes Modul um `espressif/usb_host_uac`: Ringpuffer, Task, I2S-/DAC-Ausgang, Python-API `uac.play()`/`uac.rec()` |
-| OTA, Recovery, Release-Verpackung, Doku | 3–6 Tage | |
-| **Summe bis „nutzbar"** (1 Board, 1 Display, 1 Soundkarte) | **4–7 Wochen** | |
-| Zusätzlich für die Variantenvielfalt à la Annex | + Wochen, überwiegend Panel-/Board-Arbeit | Annex' Matrix ist über Jahre entstanden |
+| Web server + config page (WLAN scan/connect, pin assignment, module/panel selection, restart, safe mode); config as JSON in flash | 3–6 days | [Microdot](https://github.com/miguelgrinberg/microdot) (Flask-like, async, MIT) covers routing, WebSocket and auth |
+| Web editor | 1–3 days with [ViperIDE](https://github.com/vshymanskyy/ViperIDE) (MIT, connects via WebREPL/USB, file manager + package manager + terminal); built oneself: 7–12 days | the editor is the largest single item if one writes it oneself |
+| LVGL build + first display (SPI-TFT + touch), memory tuning | 3–7 days | PSRAM practically mandatory |
+| each further board variant | 0.5–2 days per definition | pins, `sdkconfig`, flash/PSRAM variant, deploy guide |
+| RGB/parallel panels, further panel types | 3–8 days per panel type | panel timings, `esp_lcd`, PSRAM wiring |
+| Runtime configuration of displays (one image for many panels) | 5–10 days | panel timings and bus as data instead of compile-time constant — Annex does **not** do this, there a separate firmware is flashed per module |
+| **USB audio (UAC host) as a C module** | 4–8 days | own module around `espressif/usb_host_uac`: ring buffer, task, I2S/DAC output, Python API `uac.play()`/`uac.rec()` |
+| OTA, recovery, release packaging, docs | 3–6 days | |
+| **Total until "usable"** (1 board, 1 display, 1 sound card) | **4–7 weeks** | |
+| Additionally for the variant diversity à la Annex | + weeks, predominantly panel/board work | Annex' matrix emerged over years |
 
-Die Zahlen sind Erfahrungswerte für Arbeitsumfang, keine gemessenen Werte. Sie enthalten
-keine Hardware-Iterationen (Board-Revisionen, Timing-Probleme) — die kosten bei Displays
-erfahrungsgemäß am meisten.
+The numbers are rules of thumb for the amount of work, not measured values. They contain
+no hardware iterations (board revisions, timing problems) — by experience those cost the most
+with displays.
 
-## Vergleich der Wege
+## Comparison of the ways
 
-| | Weg B: eigener BASIC-Interpreter | Weg C: MicroPython + LVGL |
+| | Way B: own BASIC interpreter | Way C: MicroPython + LVGL |
 |---|---|---|
-| Interpreter/REPL/FS/Treiber | selbst schreiben (Wochen) | vorhanden |
-| Sprache für Nutzerprogramme | BASIC (Annex-Programme laufen) | Python (Annex-Programme laufen **nicht**) |
-| Web-Editor | selbst bauen | ViperIDE vorhanden |
-| LVGL | C, direkt, schnell | über Bindings, langsamer |
-| RAM-Bedarf | geringer | höher (PSRAM nötig) |
-| USB-Audio | selbst schreiben | selbst schreiben (gleicher Aufwand) |
-| Fazit | mehr Arbeit, volle Kontrolle, Annex-Nähe | weniger Arbeit, Python-Ökosystem, träger bei GUIs |
+| Interpreter/REPL/FS/drivers | write yourself (weeks) | present |
+| Language for user programs | BASIC (Annex programs run) | Python (Annex programs do **not** run) |
+| Web editor | build yourself | ViperIDE present |
+| LVGL | C, direct, fast | via bindings, slower |
+| RAM requirement | lower | higher (PSRAM needed) |
+| USB audio | write yourself | write yourself (same effort) |
+| Conclusion | more work, full control, close to Annex | less work, Python ecosystem, more sluggish with GUIs |
 
-## Fallstricke
+## Pitfalls
 
-1. **PHY-Sharing auf dem S3.** USB-OTG und USB-Serial-JTAG teilen sich einen PHY: solange
-   USB-Host läuft (also die Soundkarte), ist USB-Debug/Flash weg. Debug dann über UART,
-   oder eine externe PHY (SP5301 / TUSB1106) nach Datenblatt. Direkt relevant für das
-   USB-Audio-Ziel.
-2. **PSRAM ist Pflicht** für LVGL + Webserver + TLS. S3 mit 8 MB PSRAM einplanen.
-3. **Performance:** LVGL über Python-Bindings ist spürbar langsamer als Annes C-Pfad;
-   für aufwändige GUIs ein Kompromiss.
-4. **WebREPL ist unverschlüsselt** (`ws`, Passwortschutz vorhanden) — nur im LAN betreiben,
-   nicht ins Internet stellen. Annex' Web-UI hat hier eigene Auth-Logik.
-5. **Firmware-Größe** mit LVGL: ~4 MB, also 16-MB-Flash-Modul.
-6. **Fremde Firmware nachträglich ändern** bleibt unmöglich — dieser Weg liefert eine
-   *eigene* Firmware. Der Vorteil gegenüber Annex: hier darf man C-Module einhängen.
+1. **PHY sharing on the S3.** USB-OTG and USB-Serial-JTAG share one PHY: as long as
+   USB host runs (i.e. the sound card), USB debug/flash is gone. Debug then via UART,
+   or an external PHY (SP5301 / TUSB1106) per datasheet. Directly relevant for the
+   USB audio goal.
+2. **PSRAM is mandatory** for LVGL + web server + TLS. Plan for an S3 with 8 MB PSRAM.
+3. **Performance:** LVGL via Python bindings is noticeably slower than Annex's C path;
+   a compromise for elaborate GUIs.
+4. **WebREPL is unencrypted** (`ws`, password protection present) — operate only on the LAN,
+   do not expose to the internet. Annex' web UI has its own auth logic here.
+5. **Firmware size** with LVGL: ~4 MB, thus a 16 MB flash module.
+6. **Modifying foreign firmware afterwards** remains impossible — this way delivers a
+   *own* firmware. The advantage over Annex: here one may hook in C modules.
 
-## Empfohlene Meilensteine
+## Recommended milestones
 
-- **M1** MicroPython für `ESP32_GENERIC_S3`/`SPIRAM_OCT` bauen, flashen, WebREPL im
-  Browser öffnen und eine Datei übertragen. (verifizierbar an einem Tag)
-- **M2** Config-Page mit Microdot: WLAN, Pins, Modul-/Panel-Auswahl, Config in Flash.
-- **M3** ViperIDE über WebREPL als Editor benutzen (kein eigener Editor nötig).
-- **M4** LVGL auf einem TFT (SPI + Touch), PSRAM-Tuning.
-- **M5** USB-Audio-C-Modul (`usb_host_uac`) + Python-API + I2S-/DAC-Ausgabe.
-- **M6** OTA, Recovery, Release-Pakete, Doku.
+- **M1** Build MicroPython for `ESP32_GENERIC_S3`/`SPIRAM_OCT`, flash, open WebREPL in the
+  browser and transfer a file. (verifiable in one day)
+- **M2** Config page with Microdot: WLAN, pins, module/panel selection, config in flash.
+- **M3** Use ViperIDE over WebREPL as editor (no own editor needed).
+- **M4** LVGL on a TFT (SPI + touch), PSRAM tuning.
+- **M5** USB audio C module (`usb_host_uac`) + Python API + I2S/DAC output.
+- **M6** OTA, recovery, release packages, docs.

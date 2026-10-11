@@ -1,14 +1,14 @@
-# Bildquelle fuer den Debug-MCP-Server.
+# Image source for the debug MCP server.
 #
-# Wichtige Randbedingung: LVGL ist NICHT thread-sicher. Der MCP-Server laeuft in
-# einem eigenen Thread, LVGL aber in der Hauptschleife. Deshalb laufen alle
-# LVGL-Zugaenge (Snapshot, Widget-Baum) als Auftrag ueber `request(...)`:
-# Der Server-Thread legt den Auftrag ab und wartet (mit Timeout), die Hauptschleife
-# fuehrt ihn aus und legt das Ergebnis ab. Ohne Timeout wuerde ein haengender
-# Auftrag die gesamte Server-Schleife blockieren.
+# Important constraint: LVGL is NOT thread-safe. The MCP server runs in its own
+# thread, but LVGL in the main loop. That is why all LVGL accesses (snapshot,
+# widget tree) run as a job via `request(...)`:
+# The server thread posts the job and waits (with a timeout), the main loop
+# executes it and stores the result. Without a timeout a stuck job would block the
+# entire server loop.
 #
-# Zusaetzlich kann die App einen Framebuffer anmelden (attach); dann wird direkt
-# daraus gelesen, ohne LVGL anzufassen.
+# In addition the app can register a framebuffer (attach); then it is read directly
+# from there, without touching LVGL.
 
 import time
 
@@ -20,12 +20,12 @@ _STATE = {
     "label": None,
 }
 
-# Auftragsspeicher zwischen Server-Thread und LVGL-Thread.
-# Ergebnisse liegen pro Auftragsnummer in _RESULTS -- ein verzoegert fertig werdender
-# Auftrag kann so nicht das Ergebnis des naechsten Auftrags verfaelschen.
+# Job storage between the server thread and the LVGL thread.
+# Results are kept per job number in _RESULTS -- a job that finishes late cannot
+# thus falsify the result of the next job.
 _REQ = {
-    "seq": 0,        # Nummer des letzten Auftrags
-    "done": 0,       # Nummer des zuletzt erledigten Auftrags
+    "seq": 0,        # number of the last job
+    "done": 0,       # number of the last completed job
     "kind": None,
     "scale": 1,
     "max_nodes": 60,
@@ -34,7 +34,7 @@ _RESULTS = {}
 
 
 # --------------------------------------------------------------------------
-# Framebuffer-Anmeldung (optional)
+# Framebuffer registration (optional)
 # --------------------------------------------------------------------------
 
 def attach(buffer, width, height, byte_swap=True, label=None):
@@ -58,20 +58,20 @@ def describe():
     if attached():
         return "%dx%d RGB565 byte_swap=%s (%s)" % (
             _STATE["width"], _STATE["height"], _STATE["byte_swap"],
-            _STATE["label"] or "unbenannt")
-    return "Snapshot ueber LVGL (kein Framebuffer angehaengt)"
+            _STATE["label"] or "unnamed")
+    return "snapshot via LVGL (no framebuffer attached)"
 
 
 # --------------------------------------------------------------------------
-# Auftraege an den LVGL-Thread
+# Jobs to the LVGL thread
 # --------------------------------------------------------------------------
 
 def request(kind, timeout_ms=20000, **kwargs):
-    """Auftrag an den LVGL-Thread. Wirft RuntimeError bei Timeout oder Fehler.
+    """Job to the LVGL thread. Raises RuntimeError on timeout or error.
 
-    Standardtimeout 20 s: ein Snapshot in voller Aufloesung dauert auf dem ESP32
-    mehrere Sekunden -- der Server-Thread darf so lange warten, weil jede Verbindung
-    ihren eigenen Thread hat."""
+    Default timeout 20 s: a full-resolution snapshot takes several seconds on the
+    ESP32 -- the server thread may wait that long because each connection has its
+    own thread."""
     _REQ["kind"] = kind
     for key, value in kwargs.items():
         _REQ[key] = value
@@ -83,11 +83,11 @@ def request(kind, timeout_ms=20000, **kwargs):
         waited += 10
         if waited >= timeout_ms:
             raise RuntimeError(
-                "Timeout nach %d ms: LVGL-Thread hat '%s' nicht ausgefuehrt "
-                "(laeuft die Hauptschleife mit service_requests()?)" % (timeout_ms, kind))
+                "timeout after %d ms: LVGL thread did not execute '%s' "
+                "(is the main loop running service_requests()?)" % (timeout_ms, kind))
     entry = _RESULTS.pop(target, None)
     if entry is None:
-        raise RuntimeError("Auftrag %d hat kein Ergebnis hinterlassen" % target)
+        raise RuntimeError("job %d left no result" % target)
     error, result = entry
     if error:
         raise RuntimeError(error)
@@ -95,8 +95,8 @@ def request(kind, timeout_ms=20000, **kwargs):
 
 
 def service_requests():
-    """Muss in der LVGL-Schleife (Hauptthread) aufgerufen werden. Gibt True zurueck,
-    wenn ein Auftrag ausgefuehrt wurde."""
+    """Must be called in the LVGL loop (main thread). Returns True
+    if a job was executed."""
     if _REQ["kind"] is None or _REQ["done"] >= _REQ["seq"]:
         return False
     target = _REQ["seq"]
@@ -107,7 +107,7 @@ def service_requests():
         elif kind == "lvgl_tree":
             result = _lvgl_tree(_REQ["max_nodes"])
         else:
-            raise RuntimeError("unbekannter Auftrag: %s" % kind)
+            raise RuntimeError("unknown job: %s" % kind)
         _RESULTS[target] = (None, result)
     except Exception as exc:  # noqa: BLE001
         _RESULTS[target] = ("%s: %s" % (type(exc).__name__, exc), None)
@@ -117,11 +117,11 @@ def service_requests():
 
 
 # --------------------------------------------------------------------------
-# Bilder
+# Images
 # --------------------------------------------------------------------------
 
 def _downscale(data, width, height, factor):
-    """Pixel-Sampling (jeder factor-te Pixel) -- fuer Debug-Ansichten ausreichend."""
+    """Pixel sampling (every factor-th pixel) -- sufficient for debug views."""
     if factor <= 1:
         return data, width, height
     nw, nh = width // factor, height // factor
@@ -138,13 +138,13 @@ def _downscale(data, width, height, factor):
 
 
 def _snapshot(scale=1):
-    """LVGL-Snapshot der aktiven Screen. Rueckgabe: (bytes, w, h, byte_swap).
+    """LVGL snapshot of the active screen. Returns: (bytes, w, h, byte_swap).
 
-    Verifizierte API (lvgl_micropython, LVGL 9.4):
+    Verified API (lvgl_micropython, LVGL 9.4):
       lv.snapshot_take(obj, lv.COLOR_FORMAT.RGB565) -> lv_draw_buf_t
-      header: .w .h .stride .cf      Daten: .data (C_Array, ueber __dereference__)
-    Kein Zwischenkopieren: es wird direkt aus der Sicht (memoryview) verkleinert,
-    bevor der Snapshot freigegeben wird.
+      header: .w .h .stride .cf     data: .data (C_Array, via __dereference__)
+    No intermediate copying: the downscale happens directly on the view (memoryview)
+    before the snapshot is released.
     """
     import lvgl as lv
 
@@ -176,7 +176,7 @@ def _snapshot(scale=1):
 
 
 def _pack_rows(view, width, height, stride):
-    """Zeilen aus einem gepolsterten Puffer eng packen (stride != Zeilenbreite)."""
+    """Tightly pack rows from a padded buffer (stride != row width)."""
     row_bytes = width * 2
     packed = bytearray(row_bytes * height)
     offset = 0
@@ -188,7 +188,7 @@ def _pack_rows(view, width, height, stride):
 
 
 def capture(scale=1):
-    """Rueckgabe: (data, width, height, byte_swap). Wirft RuntimeError mit Begruendung."""
+    """Returns: (data, width, height, byte_swap). Raises RuntimeError with a reason."""
     if attached():
         width, height = _STATE["width"], _STATE["height"]
         data = bytearray(_STATE["buffer"])
@@ -198,44 +198,44 @@ def capture(scale=1):
 
     data, width, height, swap = request("snapshot", scale=int(scale))
     if data is None:
-        raise RuntimeError("Snapshot lieferte keine Daten")
+        raise RuntimeError("snapshot returned no data")
     return data, width, height, swap
 
 
 def attach_framebuffer(which=1):
-    """Framebuffer des Displays anmelden -- Abzug ohne LVGL-Snapshot.
+    """Register the display's framebuffer -- capture without an LVGL snapshot.
 
-    Ein Snapshot kostet auf diesem Board je nach Massstab 3 bis 20 s (LVGL-Snapshot
-    plus PNG-Kodierung in reinem Python; bei Massstab 2 laeuft er sogar in die
-    Zeitueberschreitung). Mit angemeldetem Framebuffer liest `capture` direkt daraus.
-    Tearing ist moeglich, weil LVGL parallel schreibt -- fuer Vorschauen unerheblich.
+    A snapshot costs 3 to 20 s on this board depending on the scale (LVGL snapshot
+    plus PNG encoding in pure Python; at scale 2 it even runs into the timeout).
+    With a registered framebuffer, `capture` reads directly from it.
+    Tearing is possible because LVGL writes in parallel -- irrelevant for previews.
     """
     try:
         import display_config
     except ImportError as exc:
-        return "display_config nicht verfuegbar (%s)" % exc
+        return "display_config not available (%s)" % exc
     display = getattr(display_config, "LAST_DISPLAY", None)
     if display is None:
-        return "kein Display angemeldet -- Framebuffer nicht verfuegbar"
-    puffer = getattr(display, "_frame_buffer2" if int(which) == 2 else "_frame_buffer1", None)
-    if puffer is None:
-        return "Display hat keinen Framebuffer %s" % which
-    return describe_after_attach(puffer, which)
+        return "no display registered -- framebuffer not available"
+    buffer = getattr(display, "_frame_buffer2" if int(which) == 2 else "_frame_buffer1", None)
+    if buffer is None:
+        return "display has no framebuffer %s" % which
+    return describe_after_attach(buffer, which)
 
 
-def describe_after_attach(puffer, which):
+def describe_after_attach(buffer, which):
     import display_config
-    attach(puffer, display_config.WIDTH, display_config.HEIGHT, byte_swap=True,
-           label="Display-Framebuffer %s" % which)
+    attach(buffer, display_config.WIDTH, display_config.HEIGHT, byte_swap=True,
+           label="display framebuffer %s" % which)
     return describe()
 
 
 # --------------------------------------------------------------------------
-# Widget-Baum
+# Widget tree
 # --------------------------------------------------------------------------
 
 def lvgl_tree(max_nodes=60):
-    """Widget-Baum der aktiven Screen (laeuft im LVGL-Thread)."""
+    """Widget tree of the active screen (runs in the LVGL thread)."""
     return request("lvgl_tree", max_nodes=int(max_nodes))
 
 
@@ -243,12 +243,12 @@ def _lvgl_tree(max_nodes=60):
     try:
         import lvgl as lv
     except ImportError:
-        return "lvgl nicht verfuegbar"
+        return "lvgl not available"
     lines = []
     try:
         root = lv.screen_active()
     except Exception as exc:  # noqa: BLE001
-        return "screen_active() fehlgeschlagen: %s" % exc
+        return "screen_active() failed: %s" % exc
     stack = [(root, 0)]
     while stack and len(lines) < max_nodes:
         obj, depth = stack.pop()
@@ -260,7 +260,7 @@ def _lvgl_tree(max_nodes=60):
             geom = "x=%d y=%d w=%d h=%d" % (obj.get_x(), obj.get_y(),
                                             obj.get_width(), obj.get_height())
         except Exception:  # noqa: BLE001
-            geom = "geom unbekannt"
+            geom = "geom unknown"
         extra = ""
         try:
             extra = " text=%r" % obj.get_text()
@@ -274,12 +274,12 @@ def _lvgl_tree(max_nodes=60):
         except Exception:  # noqa: BLE001
             pass
     if stack:
-        lines.append("... (%d weitere Knoten)" % len(stack))
-    return "\n".join(lines) if lines else "(leer)"
+        lines.append("... (%d more nodes)" % len(stack))
+    return "\n".join(lines) if lines else "(empty)"
 
 
 def status():
-    """Kurzbericht fuer /info und /screen."""
+    """Short report for /info and /screen."""
     return {
         "source": "framebuffer" if attached() else "lvgl-snapshot",
         "detail": describe(),

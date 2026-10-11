@@ -1,186 +1,184 @@
-# 12 -- LVGL-Fernbedienung: die Board-Oberflaeche live im Browser anzeigen und bedienen
+# 12 -- LVGL remote control: show and operate the board UI live in the browser
 
-Ziel: die LVGL-Oberflaeche des JC3248W535 (ESP32-S3, MicroPython + LVGL 9) im
-eigenen Browser sehen **und** per Maus/Touch bedienen -- ein "Fernseh-Fernbedienungs"-
-Modus, aber ausschliesslich ueber den **vorhandenen eigenen HTTP-Server**
-(`mcp_httpd.py`), ohne neue Abhaengigkeiten und ohne LVGL aus einem Fremd-Thread
-anzufassen.
+Goal: see the LVGL UI of the JC3248W535 (ESP32-S3, MicroPython + LVGL 9) in one's
+own browser **and** operate it with mouse/touch -- a "TV remote control"
+mode, but exclusively over the **existing own HTTP server**
+(`mcp_httpd.py`), without new dependencies and without touching LVGL from a foreign
+thread.
 
-Alle Zahlen in diesem Dokument sind am echten Board (192.168.1.168) gemessen,
-nur lesend. Messskript: `tools/bench_vorschau.py`. Reproduzierbar mit
+All numbers in this document are measured on the real board (192.168.1.168),
+read-only. Measurement script: `tools/bench_vorschau.py`. Reproducible with
 `python3 tools/bench_vorschau.py 3`.
 
 ---
 
-## 1. Einordnung: was andere machen
+## 1. Context: what others do
 
 ### 1.1 LVGLRemoteServer (CubeCoders)
 
-Referenz fuer "LVGL-Fenster auf den Desktop spiegeln". Wichtige Eigenschaften:
+Reference for "mirror the LVGL window to the desktop". Important properties:
 
-* **C++-Bibliothek** fuer ESP32/Arduino. Einbau in `disp_flush(disp, area, pixelmap)`
-  (`remoteDisplay.sendRLE(area, pixelmap)`), danach wie gewohnt `lv_disp_flush_ready()`.
-* **RLE-komprimierte Pakete**, **ein UDP-Paket pro Update** -- bewusst kein TCP, damit
-  jedes Paket fuer sich steht (kein Verlust-Folgezustand).
-* Uebertraegt nur den **Bounding-Rechteck-`area`** des Flushes, nicht den ganzen Schirm;
-  der Empfaenger kennt Bildgroesse und Farbformat und rendert das Rechteck.
-* **Zero allocation**: keine dynamische Speicherverwaltung, konstanter Fussabdruck.
-* **Eingabe** kommt als simulierte Touch-Events zurueck (Maus -> Zeiger).
-* Desktop-Client (Flutter/Windows) -- kein Browser.
+* **C++ library** for ESP32/Arduino. Insert into `disp_flush(disp, area, pixelmap)`
+  (`remoteDisplay.sendRLE(area, pixelmap)`), then as usual `lv_disp_flush_ready()`.
+* **RLE-compressed packets**, **one UDP packet per update** -- deliberately not TCP, so
+  that each packet stands on its own (no loss-induced follow-on state).
+* Transmits only the **bounding-rectangle `area`** of the flush, not the whole screen;
+  the receiver knows the image size and colour format and renders the rectangle.
+* **Zero allocation**: no dynamic memory management, constant footprint.
+* **Input** comes back as simulated touch events (mouse -> pointer).
+* Desktop client (Flutter/Windows) -- no browser.
 
-Kernidee, die sich uebertragen laesst: **an den Flush anhaengen, nur das geaenderte
-Rechteck senden, ein selbststehendes Paket pro Update.** Diese Idee ist auf unserem
-Board goldwert (siehe Abschnitt 4.3) -- weil LVGL uns das Rechteck bereits liefert.
+Core idea that can be carried over: **hook into the flush, send only the changed
+rectangle, one self-contained packet per update.** This idea is worth gold on our
+board (see section 4.3) -- because LVGL already delivers the rectangle to us.
 
 ### 1.2 lv_port_esp32_web (danjulio)
 
-Websocket-Treiber: LVGL schickt **Regions-Refresh** ueber eine WebSocket an eine
-mitgelieferte HTML-Seite mit `<canvas>`; Maus-/Touch-Ereignisse gehen **ueber dieselbe
-WebSocket** zurueck. Payload-Kopf: Pixeltiefe, Canvas-Breite/‑hoehe, Redraw-Region
-(X1,Y1,X2,Y2), dann Pixeldaten. Rueckrichtung: Flag (Touch/Release) + X + Y. Mehrere
-Browser gleichzeitig moeglich; beim Verbinden wird der Schirm einmal komplett
-neugezeichnet. Genau dieses Modell passt am besten zu unserem Vorhaben.
+WebSocket driver: LVGL sends **region refresh** over a WebSocket to a
+bundled HTML page with `<canvas>`; mouse/touch events go **over the same
+WebSocket** back. Payload header: pixel depth, canvas width/height, redraw region
+(X1,Y1,X2,Y2), then pixel data. Reverse direction: flag (touch/release) + X + Y. Multiple
+browsers at once are possible; on connecting, the screen is redrawn once completely.
+Exactly this model fits our plan best.
 
-### 1.3 WebAssembly-Loesungen (lv_web_emscripten, lvgl-wasm)
+### 1.3 WebAssembly solutions (lv_web_emscripten, lvgl-wasm)
 
-LVGL wird mit Emscripten nach **WebAssembly** uebersetzt und laeuft **komplett im
-Browser**. Kein Geraet, keine Uebertragung -- aber es ist eine **zweite, unabhaengige
-UI-Instanz**: sie zeigt nicht, was auf dem echten Panel passiert, und kann die echte
-Hardware (GPIO, WLAN) nicht steuern. Fuer "Debug und Fernbedienung des laufenden
-Geraets" unbrauchbar. (Anders waere es, wenn man die UI selbst browser-zuerst
-entwickelt.)
+LVGL is translated to **WebAssembly** with Emscripten and runs **entirely in the
+browser**. No device, no transmission -- but it is a **second, independent
+UI instance**: it does not show what happens on the real panel and cannot control the real
+hardware (GPIO, Wi-Fi). Useless for "debug and remote control of the running
+device". (It would be different if one developed the UI browser-first.)
 
-### 1.4 MJPEG-/Multipart-Streaming und Canvas-Delta
+### 1.4 MJPEG/multipart streaming and canvas delta
 
-* **MJPEG/`multipart/x-mixed-replace`:** eine dauerhafte HTTP-Antwort, die fortlaufend
-  fertige Bilder (`JPEG`/`PNG`) schreibt; der Browser zeigt sie mit
-  `<img src="/stream">` von allein an. Problem auf unserem Board: **jede** Bilddatei
-  muesste auf dem Geraet kodiert werden -- und PNG in reinem Python kostet hier
-  **3-22 s** (siehe `docs/11`). JPEG gibt es in diesem MicroPython-Bau nicht. Ohne
-  fertiges Bildformat kann der Browser `<img>` nicht nutzen; man braucht dann doch
-  eigenes JS, das die Rohbytes liest -- dann ist es faktisch ein eigener Push-Stream.
-* **Canvas-Delta-Updates:** der Browser zeichnet nur geaenderte Rechtecke in ein
-  Canvas -- das ist die Browserseite der ohnehin empfohlenen Delta-Uebertragung
-  (Abschnitt 2/4).
+* **MJPEG/`multipart/x-mixed-replace`:** a persistent HTTP response that continuously
+  writes finished images (`JPEG`/`PNG`); the browser displays them with
+  `<img src="/stream">` on its own. Problem on our board: **every** image file
+  would have to be encoded on the device -- and PNG in pure Python costs here
+  **3-22 s** (see `docs/11`). JPEG does not exist in this MicroPython build. Without a
+  finished image format the browser cannot use `<img>`; one then needs own JS
+  that reads the raw bytes -- and then it is effectively its own push stream.
+* **Canvas delta updates:** the browser draws only changed rectangles into a
+  canvas -- that is the browser side of the already recommended delta transmission
+  (section 2/4).
 
-### 1.5 Fazit der Einordnung
+### 1.5 Conclusion of the context
 
-Fuer **unser** Board ist die tragfaehige Linie: **Rohpuffer RGB565 ueber den eigenen
-HTTP-Server, nur geaenderte Rechtecke, Eingabe zurueck in einen zweiten LVGL-Indev.**
-Ob dazwischen Polling, ein langlebiger Push-Stream oder eine WebSocket liegt, ist
-eine Detailfrage -- alle drei sind mit dem vorhandenen Server machbar (Abschnitt 2).
+For **our** board the viable line is: **raw buffer RGB565 over the own
+HTTP server, only changed rectangles, input back into a second LVGL indev.**
+Whether polling, a long-lived push stream or a WebSocket lies in between is
+a detail question -- all three are feasible with the existing server (section 2).
 
 ---
 
-## 2. Konkreter Entwurf fuer unser Board
+## 2. Concrete design for our board
 
-### 2.1 Uebertragungsweg: Polling vs. Multipart-Push vs. WebSocket
+### 2.1 Transport: polling vs. multipart push vs. WebSocket
 
-Ausgangslage des Servers (`mcp_httpd.py`): HTTP/1.1, Routentabelle
-`"METHOD /pfad" -> handler(Request) -> Response`, **kein WebSocket, kein
-Chunked-Transfer, jede Antwort schliesst die Verbindung**, bis zu 4 Arbeitsthreads.
+Starting point of the server (`mcp_httpd.py`): HTTP/1.1, route table
+`"METHOD /path" -> handler(Request) -> Response`, **no WebSocket, no
+chunked transfer, every response closes the connection**, up to 4 worker threads.
 
-Gemessenes Nadeloehr ist **nicht die Rechenzeit, sondern der WLAN-Durchsatz**:
-durchgehend **~660-830 KB/s** beim Senden eines 307200-Byte-Frames. Zusaetzlich
-kostet **jeder neue Verbindungsaufbau ~67 ms** (gemessen: `GET /screen`, kleine
-Antwort). Daraus die drei Wege:
+The measured bottleneck is **not the computation time, but the Wi-Fi throughput**:
+throughout **~660-830 KB/s** when sending a 307200-byte frame. In addition
+**every new connection setup costs ~67 ms** (measured: `GET /screen`, small
+response). Hence the three paths:
 
-| Weg | Prinzip | Vorteil | Nachteil | Bewertung |
+| Path | Principle | Advantage | Disadvantage | Rating |
 |---|---|---|---|---|
-| **Polling** (wie heute) | `fetch("/screen.raw?scale=1")` im Takt | nutzt den Server **unveraendert**; robust gegen Abbruch; kein neuer Servercode | 67 ms Aufschlag **pro** Frame; feste Rate auch ohne Aenderung | **P0** |
-| **Multipart-/Laengen-Push** | **eine** langlebige `GET`-Antwort, in die der Handler fortlaufend `[4 Byte Laenge][RGB565]`-Frames schreibt | kein Verbindungsaufschlag (2,2 statt 1,9 fps bei Vollbild); Aenderungs-Push moeglich | Handler muss die Verbindung "besitzen"; Browser liest per `ReadableStream`; ein Worker-Thread je Betrachter dauerhaft belegt | **P2-Alternative** |
-| **WebSocket** (binaer) | echte bidirektionale Sitzung; Bild hin, Zeiger zurueck | niedrigster Overhead; Eingabe auf **derselben** Leitung; nah an `lv_port_esp32_web` | Handshake muss **selbst** gerechnet werden; `mcp_httpd` muss den Socket an den Handler durchreichen; ein Thread je Sitzung | **Empfohlenes Ziel** |
+| **Polling** (as today) | `fetch("/screen.raw?scale=1")` on a timer | uses the server **unchanged**; robust against aborts; no new server code | 67 ms overhead **per** frame; fixed rate even without change | **P0** |
+| **Multipart/length push** | **one** long-lived `GET` response into which the handler continuously writes `[4 byte length][RGB565]` frames | no connection overhead (2.2 instead of 1.9 fps at full screen); change push possible | handler must "own" the connection; browser reads via `ReadableStream`; one worker thread permanently occupied per viewer | **P2 alternative** |
+| **WebSocket** (binary) | real bidirectional session; image out, pointer back | lowest overhead; input on the **same** line; close to `lv_port_esp32_web` | handshake must be computed **by oneself**; `mcp_httpd` must pass the socket through to the handler; one thread per session | **Recommended target** |
 
-**Wichtiger Befund zur Machbarkeit der WebSocket:** Dieser MicroPython-Bau bringt sie
-fast mit. Am Board geprueft (lesend):
+**Important finding on WebSocket feasibility:** this MicroPython build almost
+brings it. Verified on the board (read-only):
 
-* `import websocket` liefert ein **C-Modul** (`extmod/modwebsocket.c`,
-  Objekt `websocket.websocket(sock)`) mit `read`, `readinto`, `readline`, `write`,
-  `close`, `ioctl` -- es erledigt **das gesamte Frame-Parsing/Masking**.
-* `import asyncio` vorhanden (`start_server`).
-* `hashlib.sha1(b"...").digest()` **funktioniert** (nur `hexdigest()` fehlt) und
-  `ubinascii.b2a_base64()` liefert die Base64-Form -- damit ist
-  `Sec-WebSocket-Accept = base64(sha1(key + GUID))` berechenbar.
-* `_thread.allocate_lock()` vorhanden.
+* `import websocket` delivers a **C module** (`extmod/modwebsocket.c`,
+  object `websocket.websocket(sock)`) with `read`, `readinto`, `readline`, `write`,
+  `close`, `ioctl` -- it handles **the entire frame parsing/masking**.
+* `import asyncio` present (`start_server`).
+* `hashlib.sha1(b"...").digest()` **works** (only `hexdigest()` is missing) and
+  `ubinascii.b2a_base64()` delivers the Base64 form -- so
+  `Sec-WebSocket-Accept = base64(sha1(key + GUID))` is computable.
+* `_thread.allocate_lock()` present.
 
-Es fehlt also nur der **HTTP-Upgrade-Handshake** (ca. 30 Zeilen Python) und ein
-**Weg, den angenommenen Socket an einen Handler zu geben**. Letzteres ist die einzige
-echte Aenderung am Server: entweder ein zweiter Listener auf eigenem Port (z. B. 81)
-mit eigener Accept-Schleife -- **additiv, ohne `mcp_httpd` anzufassen** -- oder eine
-kleine `Response`-Spielart "Verbindung bleibt offen", die den `stream` an den Handler
-uebergibt.
+So only the **HTTP upgrade handshake** is missing (about 30 lines of Python) and a
+**way to hand the accepted socket to a handler**. The latter is the only
+real change to the server: either a second listener on its own port (e.g. 81)
+with its own accept loop -- **additive, without touching `mcp_httpd`** -- or a
+small `Response` variant "connection stays open" that passes the `stream` to the handler.
 
-**Empfehlung:**
+**Recommendation:**
 
-* **P0/P1 (jetzt):** Polling. Kein Umbau, sofort sichtbar. Vollbild bei ~2 fps.
-* **P2 (Ziel):** **WebSocket** auf eigenem Port (Route `/ws`), binaere Frames,
-  dieselbe Sitzung traegt Bild **und** Zeiger. Der `websocket`-Extmod nimmt uns das
-  Framing ab; das ist der geringste Risikoaufwand fuer die beste Wirkung. Der
-  Multipart-Laengen-Push ist die Ausweichvariante, falls der Handshake scheitert.
+* **P0/P1 (now):** polling. No rebuild, immediately visible. Full screen at ~2 fps.
+* **P2 (target):** **WebSocket** on its own port (route `/ws`), binary frames,
+  the same session carries image **and** pointer. The `websocket` extmod takes the
+  framing off our hands; that is the smallest risk effort for the best effect. The
+  multipart length push is the fallback variant if the handshake fails.
 
-### 2.2 Bildformat
+### 2.2 Image format
 
-**Rohpuffer RGB565, 2 Byte/Pixel, `rgb565_byte_swap=True`** -- exakt das, was
-`/screen.raw?scale=1` heute liefert und was `app.js` bereits im Canvas korrekt
-zurueckrechnet (Zeile 167-173: `roh[i] | roh[i+1]<<8`, dann RGB565->RGBA). Kein
-Geraete-seitiges Kodieren.
+**Raw buffer RGB565, 2 bytes/pixel, `rgb565_byte_swap=True`** -- exactly what
+`/screen.raw?scale=1` delivers today and what `app.js` already converts correctly in the canvas
+(lines 167-173: `roh[i] | roh[i+1]<<8`, then RGB565->RGBA). No
+device-side encoding.
 
-Bewertung der Formatalternativen **auf diesem Board**:
+Evaluation of the format alternatives **on this board**:
 
-| Format | Aufwand am Geraet | Urteil |
+| Format | Effort on the device | Verdict |
 |---|---|---|
-| **Roh RGB565** | nur Kopie (307200 B = **38 ms**, 8,1 MB/s memcpy) | **Standard** |
-| **Deflate** (`deflate.DeflateIO` existiert) | reines Python-Deflate kostet **3-22 s** pro Frame | **ausgeschlossen** |
-| **RLE** | Encoder waere reines Python; schon der *Diff-Scan* kostet 395 ms (s. 4.3) | **nur in C sinnvoll** -- mit reinem Python unbrauchbar |
-| **Delta-Rechtecke** | LVGL liefert das Rechteck **umsonst** (C-seitig, s. 4.3) | **bevorzugt ab P2** |
-| **PNG/JPEG** | PNG 3-22 s; JPEG fehlt | **ausgeschlossen** |
+| **Raw RGB565** | only copy (307200 B = **38 ms**, 8.1 MB/s memcpy) | **standard** |
+| **Deflate** (`deflate.DeflateIO` exists) | pure-Python deflate costs **3-22 s** per frame | **excluded** |
+| **RLE** | encoder would be pure Python; even the *diff scan* costs 395 ms (see 4.3) | **only sensible in C** -- unusable with pure Python |
+| **Delta rectangles** | LVGL delivers the rectangle **for free** (C side, see 4.3) | **preferred from P2** |
+| **PNG/JPEG** | PNG 3-22 s; JPEG missing | **excluded** |
 
-Merksatz: **Nicht auf dem Geraet in Python ueber Pixel laufen.** Weder verkleinern
-(2.3), noch komprimieren, noch diffen. Ueber Pixel laeuft der **Browser** (JS ist
-schnell) oder ein C-Pfad im LVGL-Flush.
+Mnemonic: **Do not run over pixels on the device in Python.** Neither shrink
+(2.3), nor compress, nor diff. The **browser** (JS is fast) or a C path in the
+LVGL flush runs over pixels.
 
-### 2.3 Bildrate, Speicher, CPU
+### 2.3 Frame rate, memory, CPU
 
-* Native Aufloesung 320x480 ist die **einzige** sinnvolle Uebertragungsgroesse: das
-  geraeteseitige Verkleinern ist der langsamste Pfad ueberhaupt (Abschnitt 4.2). Will
-  man kleiner darstellen, **skaliert der Browser** das Canvas hoch/runter -- das ist
-  gratis.
-* **Vollbild-Push** erreicht **~2,2 fps** (0,455 s Transfer + ~0,067 s Aufschlag
-  beim Polling). Das ist fuer "mitlesen/debuggen" brauchbar, fuer flüssige Animationen
-  nicht.
-* **Delta-Rechtecke ab P2** heben das auf **8-26 fps** fuer typische UI-Aenderungen
-  (Extrapolation, Abschnitt 4.4); im Ruhezustand fluessen **0 Byte**.
-* **Speicher:** anliegendes Vollbild braucht in PSRAM einen Schatten-/Sendepuffer von
-  307200 B. Der MicroPython-GC-Heap ist PSRAM-gedeckt (frei gemessen: **~6,0-6,5 MB**).
-  Der **interne SRAM** ist mit **~32 KB frei** sehr knapp -- jede Zusatzstruktur dort
-  (Queues, Socket-Puffer) klein halten und Datenpuffer in PSRAM lassen.
-* **CPU:** Der eigentliche Engpass ist die Funkstrecke; das Senden laeuft in C. Der
-  Python-Anteil pro Vollbild ist ~2 Kopien (38 ms). Wichtig: der **Framebuffer-Abzug
-  beruehrt LVGL nicht** -- er liest nur Speicher, die Hauptschleife laeuft weiter.
+* Native resolution 320x480 is the **only** sensible transmission size: the
+  device-side shrinking is the slowest path of all (section 4.2). If one wants
+  to display smaller, **the browser scales** the canvas up/down -- that is
+  free.
+* **Full-screen push** reaches **~2.2 fps** (0.455 s transfer + ~0.067 s overhead
+  during polling). That is usable for "following/debugging", not for fluid
+  animations.
+* **Delta rectangles from P2** raise that to **8-26 fps** for typical UI changes
+  (extrapolation, section 4.4); at idle **0 bytes** flow.
+* **Memory:** an incoming full screen needs a shadow/send buffer of
+  307200 B in PSRAM. The MicroPython GC heap is PSRAM-backed (measured free: **~6.0-6.5 MB**).
+  The **internal SRAM** is very tight at **~32 KB free** -- keep every extra structure
+  there (queues, socket buffers) small and leave data buffers in PSRAM.
+* **CPU:** the real bottleneck is the radio link; the sending runs in C. The
+  Python share per full screen is ~2 copies (38 ms). Important: the **framebuffer capture
+  does not touch LVGL** -- it only reads memory, the main loop continues.
 
 ---
 
-## 3. Eingabeweg: Browser-Zeiger -> LVGL
+## 3. Input path: browser pointer -> LVGL
 
-Wir koennen keinen bestehenden LVGL-Indev "fernsteuern", weil der physische Touch
-(`axs15231.AXS15231`) seine Koordinaten selbst am I2C liest. Stattdessen registrieren
-wir einen **zweiten Pointer-Indev**, dessen Python-Lese-Callback die Ereignisse aus
-einer Warteschlange zieht. Verifizierte API (aus
+We cannot "remote-control" an existing LVGL indev, because the physical touch
+(`axs15231.AXS15231`) reads its coordinates itself on I2C. Instead we register a
+**second pointer indev** whose Python read callback pulls the events from
+a queue. Verified API (from
 `/opt/lvgl_micropython/api_drivers/py_api_drivers/frozen/indev/_indev_base.py`,
-`pointer_framework.py` und `lvgl.pyi`):
+`pointer_framework.py` and `lvgl.pyi`):
 
 * `lv.indev_create()` -> `indev_t` (`lvgl.pyi:19701`)
-* `indev.set_type(lv.INDEV_TYPE.POINTER)` (`:10842`, `INDEV_TYPE` ab `:979`)
+* `indev.set_type(lv.INDEV_TYPE.POINTER)` (`:10842`, `INDEV_TYPE` from `:979`)
 * `indev.set_display(lv.display_get_default())` (`:10866`)
-* `indev.set_read_cb(cb)` (`:10848`) -- `cb(drv, data)`; `data` ist `indev_data_t`
-  mit `data.point.x`, `data.point.y`, `data.state`, `data.continue_reading`
+* `indev.set_read_cb(cb)` (`:10848`) -- `cb(drv, data)`; `data` is `indev_data_t`
+  with `data.point.x`, `data.point.y`, `data.state`, `data.continue_reading`
   (`:11204-11278`)
 * `indev.enable(True)` (`:10836`)
 
-`_indev_base.IndevBase._read` ist genau das Muster: `data.point.x/y` setzen,
-`data.state` setzen, `data.continue_reading = False`.
+`_indev_base.IndevBase._read` is exactly that pattern: set `data.point.x/y`,
+set `data.state`, `data.continue_reading = False`.
 
-### 3.1 Empfohlener Code (laeuft im LVGL-/Hauptthread)
+### 3.1 Recommended code (runs in the LVGL/main thread)
 
 ```python
 # New file: firmware/mcpsrv/mcp_pointer.py
@@ -233,240 +231,239 @@ def create():
     return _INDEV
 ```
 
-`main.py` bekommt **eine** Zeile nach `start_touch()`: `mcp_pointer.create()`
-(im LVGL-Thread, also vor der Hauptschleife). Der bestehende physische Touch-Indev
-bleibt unveraendert daneben bestehen -- LVGL wertet beide Zeigerquellen aus.
+`main.py` gets **one** line after `start_touch()`: `mcp_pointer.create()`
+(in the LVGL thread, i.e. before the main loop). The existing physical touch indev
+remains unchanged next to it -- LVGL evaluates both pointer sources.
 
-### 3.2 Alternative: `PointerDriver`-Unterklasse
+### 3.2 Alternative: `PointerDriver` subclass
 
-Wer die vorhandene Kette mit Kalibrierung nutzen will, kann
-`pointer_framework.PointerDriver` unterklassen und `_get_coords()` ueberschreiben:
+Whoever wants to use the existing chain with calibration can
+subclass `pointer_framework.PointerDriver` and override `_get_coords()`:
 
 ```python
 class WebPointer(pointer_framework.PointerDriver):
     def _get_coords(self):
         ev = _pop()
         if ev is None:
-            return None                      # -> Driver meldet RELEASED
+            return None                      # -> driver reports RELEASED
         pressed, x, y = ev
         return (self.PRESSED if pressed else self.RELEASED), x, y
 ```
 
-`PointerDriver._read` behandelt `None` korrekt (Zustand RELEASED, Koordinaten
-bleiben auf dem letzten Wert). Nachteil: erzwingt Kalibrierdaten und die
-Display-Wrapper-Logik. Fuer eingespeiste Pixelkoordinaten ist der direkte
-`lv.indev_create`-Weg (3.1) schlanker und exakter.
+`PointerDriver._read` treats `None` correctly (state RELEASED, coordinates
+stay at the last value). Disadvantage: forces calibration data and the
+display wrapper logic. For injected pixel coordinates the direct
+`lv.indev_create` path (3.1) is leaner and more exact.
 
-### 3.3 Die Server-Seite (Eingabe)
+### 3.3 The server side (input)
 
-Ein winziger POST-Endpunkt reicht, weil die Eingaberichtung **sehr** wenig Daten
-bewegt (ein paar Dutzend Byte je Ereignis) -- der 67-ms-Aufschlag faellt hier nicht
-ins Gewicht:
+A tiny POST endpoint suffices, because the input direction moves **very** little data
+(a few dozen bytes per event) -- the 67-ms overhead does not matter here:
 
 ```python
-# GET/POST /api/pointer?x=..&y=..&p=1   (p=1 drauf, p=0 los)
+# GET/POST /api/pointer?x=..&y=..&p=1   (p=1 down, p=0 up)
 def api_pointer(req):
     x = int(req.arg("x", "0")); y = int(req.arg("y", "0"))
     p = req.arg("p", "1") == "1"
-    mcp_pointer.push(x, y, p)          # nur Liste anfassen, kein LVGL
+    mcp_pointer.push(x, y, p)          # only touch the list, no LVGL
     return mcp_httpd.json_response({"ok": True})
 ```
 
-Im Browser (in `app.js` des Viewers): `pointerdown`/`pointermove`/`pointerup` auf dem
-Canvas; `clientX/Y` minus Canvas-Ursprung, durch den Darstellungsmassstab geteilt
--> Panel-Koordinaten -> `fetch("/api/pointer?x=..&y=..&p=..")`. Bei einer WebSocket
-(P2) entfaellt der zweite Kanal: dieselbe Sitzung traegt das Zeigerpaket
-`[flag][x_hi][x_lo][y_hi][y_lo]` (Muster aus `lv_port_esp32_web`).
+In the browser (in `app.js` of the viewer): `pointerdown`/`pointermove`/`pointerup` on the
+canvas; `clientX/Y` minus canvas origin, divided by the display scale
+-> panel coordinates -> `fetch("/api/pointer?x=..&y=..&p=..")`. With a WebSocket
+(P2) the second channel is dropped: the same session carries the pointer packet
+`[flag][x_hi][x_lo][y_hi][y_lo]` (pattern from `lv_port_esp32_web`).
 
-**Threadsicherheit:** LVGL wird **ausschliesslich** im Lese-Callback im Hauptthread
-angefasst. Der Server-Thread schiebt nur Tupel in eine Liste unter einem Lock -- dieselbe
-Disziplin wie `mcp_screen.request()`.
+**Thread safety:** LVGL is touched **exclusively** in the read callback in the main thread.
+The server thread only pushes tuples into a list under a lock -- the same
+discipline as `mcp_screen.request()`.
 
 ---
 
-## 4. Gemessene Werte am echten Board
+## 4. Measured values on the real board
 
-Board: 192.168.1.168, `gc_free` ~6,0-6,5 MB, `freq 240 MHz`, Bildquelle
-`Display-Framebuffer 1` (320x480 RGB565, `byte_swap=True`). Alle Messungen **nur
-lesend** (GET + `exec_python` ohne Zustandsaenderung).
+Board: 192.168.1.168, `gc_free` ~6.0-6.5 MB, `freq 240 MHz`, image source
+`Display-Framebuffer 1` (320x480 RGB565, `byte_swap=True`). All measurements **read-only**
+(GET + `exec_python` without state change).
 
-### 4.1 Vollbild / Durchsatz (`tools/bench_vorschau.py`)
+### 4.1 Full screen / throughput (`tools/bench_vorschau.py`)
 
-| Aufruf | Bytes | Aufloesung | Zeit | Durchsatz |
+| Call | Bytes | Resolution | Time | Throughput |
 |---|---|---|---|---|
-| `/screen.raw?scale=1` | 307200 | 320x480 | **0,397-0,602 s**, Mittel **0,457 s** (n=10) | **657 KB/s**, **~2,2 fps** |
-| `/screen.raw?scale=2` | 76800 | 160x240 | **4,6-6,0 s** | ~16 KB/s |
-| `/screen.raw?scale=4` | 19200 | 80x120 | 1,19-1,32 s | ~15 KB/s |
-| `/screen.raw?scale=8` | 4800 | 40x60 | ~0,39 s | ~12 KB/s |
-| `GET /screen` (klein) | ~120 | -- | **~0,067 s** | (Aufschlagsmessung) |
+| `/screen.raw?scale=1` | 307200 | 320x480 | **0.397-0.602 s**, mean **0.457 s** (n=10) | **657 KB/s**, **~2.2 fps** |
+| `/screen.raw?scale=2` | 76800 | 160x240 | **4.6-6.0 s** | ~16 KB/s |
+| `/screen.raw?scale=4` | 19200 | 80x120 | 1.19-1.32 s | ~15 KB/s |
+| `/screen.raw?scale=8` | 4800 | 40x60 | ~0.39 s | ~12 KB/s |
+| `GET /screen` (small) | ~120 | -- | **~0.067 s** | (overhead measurement) |
 
-Lesart:
+Reading:
 
-* **`scale=1` ist der schnellste Weg** -- es ist die reine Framebuffer-Kopie plus
-  Funkstrecke. Jede Verkleinerung ist **langsamer**, nicht schneller (4.2).
-* Reale Netto-Rate: **~660-830 KB/s**. Das ist das Bandbreiten-Budget fuer alles.
-* **~67 ms pro Verbindung** -- bei Vollbild vernachlaessigbar (400 ms dominiert), bei
-  kleinen Delta-Rechtecken der **beherrschende** Posten (4.4). Genau deshalb ist fuer
-  P2 ein dauerhafter Kanal wichtig.
+* **`scale=1` is the fastest path** -- it is the pure framebuffer copy plus
+  radio link. Every shrinking is **slower**, not faster (4.2).
+* Real net rate: **~660-830 KB/s**. That is the bandwidth budget for everything.
+* **~67 ms per connection** -- negligible at full screen (400 ms dominates), at
+  small delta rectangles the **dominating** item (4.4). Precisely why a
+  persistent channel is important for P2.
 
-### 4.2 Warum Verkleinern auf dem Geraet scheitert
+### 4.2 Why shrinking on the device fails
 
-`mcp_screen._downscale()` laeuft als **Python-Schleife ueber jedes Ziel-Pixel**
-(Zeile 123-137). `scale=2` = 76800 Python-Iterationen -> **4,6-6,0 s**. Deshalb ist
-der heute in der Weboberflaeche genutzte `scale=4`-Weg (~1,2 s/Frame) **kein** guter
-Ausgangspunkt fuer einen Live-Viewer. Fuer Live gilt: **Vollbild roh senden** und im
-Browser skalieren.
+`mcp_screen._downscale()` runs as a **Python loop over every target pixel**
+(line 123-137). `scale=2` = 76800 Python iterations -> **4.6-6.0 s**. Therefore the
+`scale=4` path used today in the web interface (~1.2 s/frame) is **not** a good
+starting point for a live viewer. For live: **send the full screen raw** and scale
+in the browser.
 
-### 4.3 Speicher-/CPU-Kosten auf dem Board (`exec_python`, nur rechnend)
+### 4.3 Memory/CPU costs on the board (`exec_python`, computation only)
 
-* **Framebuffer-Kopie** 307200 B (`bytearray(fb)`): **38 ms** -> **8,1 MB/s**
-  Speicherbandbreite. Das ist der einzige noetige Python-Anteil; er ist 12x schneller
-  als die Funkstrecke, also irrelevant.
-* **Diff-Scan in reinem Python** (480 Zeilen als Zeilenvergleich): **395 ms/Frame** ->
-  fuer einen Frame-Diff **unbrauchbar**. Ein Python-Schattenpuffer-Vergleich ist damit
-  **kein** gangbarer Weg.
-* **Idle-Diff** (zwei Vollbilder im Abstand 1 s): **0 unterschiedliche Pixel** von
-  153600. Bei stehender UI ist der Delta-Uebertrag **0 Byte** -- der Nutzen von
-  Delta-Rechtecken ist also maximal.
-* **Heap:** `gc_free` schwankte waehrend der Benchmark-Runde um ~0,4 MB
-  (6,44 -> 6,04 MB, danach erholt) -- die Vollbild-Puffer erzeugen Allokations-Churn.
-  Kein Leck, aber Grund, Sendepuffer wiederzuverwenden statt pro Frame neu zu bauen.
-  **Interner SRAM frei: ~32 KB** -- sehr knapp.
+* **Framebuffer copy** 307200 B (`bytearray(fb)`): **38 ms** -> **8.1 MB/s**
+  memory bandwidth. That is the only necessary Python share; it is 12x faster
+  than the radio link, so irrelevant.
+* **Diff scan in pure Python** (480 rows as a row comparison): **395 ms/frame** ->
+  **unusable** for a frame diff. A Python shadow-buffer comparison is therefore
+  **not** a viable path.
+* **Idle diff** (two full screens 1 s apart): **0 differing pixels** of
+  153600. When the UI is static the delta transmission is **0 bytes** -- so the benefit of
+  delta rectangles is maximal.
+* **Heap:** `gc_free` fluctuated during the benchmark round by ~0.4 MB
+  (6.44 -> 6.04 MB, then recovered) -- the full-screen buffers create allocation churn.
+  No leak, but reason to reuse send buffers instead of building them anew per frame.
+  **Internal SRAM free: ~32 KB** -- very tight.
 
-### 4.4 Delta-Rechtecke: die entscheidende Wiederverwendung (Schluesselbefund)
+### 4.4 Delta rectangles: the decisive reuse (key finding)
 
-Der laufende Display-Treiber ist im **FULL-Render-Modus mit vollen Framebuffern**
-(`display_driver_framework.py:253`, 2 x 307200 B), und **`_flush_cb(_, area, color_p)`
-bekommt von LVGL das geaenderte Rechteck `area`** (`:580`). Genau der Ansatzpunkt von
-`LVGLRemoteServer`: **statt den Schirm zu diffen, das fertige Rechteck aus dem Flush
-mitnehmen.** Kein Python-Scan noetig, keine 395 ms.
+The running display driver is in **FULL-render mode with full framebuffers**
+(`display_driver_framework.py:253`, 2 x 307200 B), and **`_flush_cb(_, area, color_p)`
+receives from LVGL the changed rectangle `area`** (`:580`). Exactly the approach of
+`LVGLRemoteServer`: **instead of diffing the screen, take the finished rectangle from the flush.**
+No Python scan needed, no 395 ms.
 
-Extrapolation des erreichbaren Bildraten-Budgets bei **660 KB/s** (gemessenes
-`_flush`-`area`-Rechteck -> bytes):
+Extrapolation of the achievable frame-rate budget at **660 KB/s** (measured
+`_flush`-`area` rectangle -> bytes):
 
-| Rechteck | Bytes | Polling (mit 67 ms) | **dauerhafter Kanal** |
+| Rectangle | Bytes | Polling (with 67 ms) | **persistent channel** |
 |---|---|---|---|
-| 320x480 (Vollbild) | 307200 | 1,9 fps | 2,2 fps |
-| 320x240 | 153600 | 3,4 fps | 4,4 fps |
-| 320x120 | 76800 | 5,5 fps | 8,8 fps |
-| 160x120 | 38400 | 8,1 fps | 17,6 fps |
-| 320x40 (Zaehler/Label) | 25600 | 9,5 fps | 26,4 fps |
-| 80x60 | 9600 | 12,3 fps | 70 fps (LVGL-Refresh deckelt) |
+| 320x480 (full screen) | 307200 | 1.9 fps | 2.2 fps |
+| 320x240 | 153600 | 3.4 fps | 4.4 fps |
+| 320x120 | 76800 | 5.5 fps | 8.8 fps |
+| 160x120 | 38400 | 8.1 fps | 17.6 fps |
+| 320x40 (counter/label) | 25600 | 9.5 fps | 26.4 fps |
+| 80x60 | 9600 | 12.3 fps | 70 fps (LVGL refresh caps it) |
 
-**Fazit:** Vollbild = "mitlesen/debuggen"; typische UI-Aenderungen per Flush-Rechteck
-+ dauerhaftem Kanal = fluessige Fernbedienung.
+**Conclusion:** full screen = "following/debugging"; typical UI changes via flush rectangle
++ persistent channel = fluid remote control.
 
 ---
 
-## 5. Umsetzungsplan in Stufen
+## 5. Implementation plan in stages
 
-### P0 -- nur Anzeige, niedrige Bildrate (kein Firmware-Eingriff in LVGL)
+### P0 -- display only, low frame rate (no firmware change in LVGL)
 
-* **Neue Datei** `firmware/webfiles/viewer.html` + `viewer.js` (bzw. ein Reiter
-  "Bildschirm" in der bestehenden `index.html`). Holt im Takt
-  `fetch("/screen.raw?scale=1", {cache:"no-store"})`, liest `X-Screen` und
-  `X-Byte-Swap`, rechnet RGB565 im Canvas (Vorlage: `app.js` `shot()`, Zeile 145-179),
-  zeichnet. **Kein** `scale>1` benutzen (4.2).
-* **Neuer Endpunkt** in `mcp_tools.build_routes()`: nichts noetig -- `/screen.raw`
-  existiert. Optional ein `GET /viewer` -> `statisch("viewer.html")` in
+* **New file** `firmware/webfiles/viewer.html` + `viewer.js` (or a tab
+  "Screen" in the existing `index.html`). Fetches on a timer
+  `fetch("/screen.raw?scale=1", {cache:"no-store"})`, reads `X-Screen` and
+  `X-Byte-Swap`, computes RGB565 in the canvas (template: `app.js` `shot()`, line 145-179),
+  draws. Do **not** use `scale>1` (4.2).
+* **New endpoint** in `mcp_tools.build_routes()`: nothing needed -- `/screen.raw`
+  exists. Optionally a `GET /viewer` -> `statisch("viewer.html")` in
   `mcp_webui.build_routes()`.
-* **Ergebnis:** ~2 fps, reine Anzeige. Sofort nutzbar, ohne Risiko.
+* **Result:** ~2 fps, display only. Immediately usable, without risk.
 
-### P1 -- Eingabe (Fernbedienung)
+### P1 -- input (remote control)
 
-* **Neue Datei** `firmware/mcpsrv/mcp_pointer.py` (Code aus 3.1).
-* **`firmware/device/main.py`:** eine Zeile `mcp_pointer.create()` nach
-  `start_touch()` (LVGL-Thread!). Das ist die **einzige** Beruehrung einer
-  Bestandsdatei -- absichtlich minimal.
-* **Neuer Endpunkt** `GET/POST /api/pointer` in `mcp_webui.build_routes()` +
+* **New file** `firmware/mcpsrv/mcp_pointer.py` (code from 3.1).
+* **`firmware/device/main.py`:** one line `mcp_pointer.create()` after
+  `start_touch()` (LVGL thread!). That is the **only** touch of an
+  existing file -- deliberately minimal.
+* **New endpoint** `GET/POST /api/pointer` in `mcp_webui.build_routes()` +
   `api_pointer()` (3.3).
-* **`viewer.js`:** `pointerdown/move/up` -> Koordinaten umrechnen -> `/api/pointer`.
-* **Ergebnis:** Klicken/Ziehen im Browser bedient die echte UI; auf dem Panel sichtbar.
+* **`viewer.js`:** `pointerdown/move/up` -> convert coordinates -> `/api/pointer`.
+* **Result:** clicking/dragging in the browser operates the real UI; visible on the panel.
 
-### P2 -- Optimierung auf geaenderte Bereiche + dauerhafter Kanal
+### P2 -- optimisation to changed areas + persistent channel
 
-* **Delta-Quelle (Firmware, klein):** den Display-Flush anzapfen, ohne LVGL zu
-  duplizieren. Eleganteste Variante: `axs15231b.AXS15231B._flush_cb` bzw. den
-  `display_driver_framework`-Flush **erweitern** um einen Hook, der `area` +
-  `color_p`-Ausschnitt an `mcp_screen` reicht (z. B. `mcp_screen.push_region(x1,y1,x2,y2, view)`).
-  Der Treiber liegt in `firmware/device/drivers/axs15231b.py` (bereits geforkt) bzw.
-  `display_driver_framework.py`. Achtung: Hook **im LVGL-Thread** ausfuehren, nur
-  kopieren/ablegen.
-* **Kanal:** `websocket`-Extmod + `asyncio` auf eigenem Port (z. B. 81, Route `/ws`),
-  additiv neben `mcp_httpd` -- so bleibt der bestehende Server unberuehrt. Handshake
-  mit `hashlib.sha1().digest()` + `ubinascii.b2a_base64()`; binaere Frames
-  `[x1][y1][x2][y2][rgb565...]` (Muster `lv_port_esp32_web`); Zeiger-Rueckpaket auf
-  derselben Leitung.
-  Ausweichvariante ohne WebSocket: langlebige `GET`-Antwort mit
-  `[4 Byte Laenge][Frame]`-Praefix; dafuer muss `mcp_httpd` den Socket an den Handler
-  durchreichen.
-* **Browser:** Canvas-Delta zeichnen (`ctx.putImageData(img, x1, y1)`), nur das
-  empfangene Rechteck.
-* **Ergebnis:** Ruhe = 0 Byte; typische UI-Aenderungen ~8-26 fps (4.4).
+* **Delta source (firmware, small):** tap the display flush without duplicating
+  LVGL. Most elegant variant: **extend** `axs15231b.AXS15231B._flush_cb` or the
+  `display_driver_framework` flush with a hook that passes the `area` +
+  `color_p` region to `mcp_screen` (e.g. `mcp_screen.push_region(x1,y1,x2,y2, view)`).
+  The driver lies in `firmware/device/drivers/axs15231b.py` (already forked) or
+  `display_driver_framework.py`. Note: run the hook **in the LVGL thread**, only
+  copy/store.
+* **Channel:** `websocket` extmod + `asyncio` on its own port (e.g. 81, route `/ws`),
+  additive next to `mcp_httpd` -- so the existing server stays untouched. Handshake
+  with `hashlib.sha1().digest()` + `ubinascii.b2a_base64()`; binary frames
+  `[x1][y1][x2][y2][rgb565...]` (pattern `lv_port_esp32_web`); pointer return packet on
+  the same line.
+  Fallback variant without WebSocket: long-lived `GET` response with
+  `[4 byte length][Frame]` prefix; for that `mcp_httpd` must pass the socket through
+  to the handler.
+* **Browser:** draw canvas delta (`ctx.putImageData(img, x1, y1)`), only the
+  received rectangle.
+* **Result:** idle = 0 bytes; typical UI changes ~8-26 fps (4.4).
 
-### Betroffene / neue Dateien im Ueberblick
+### Affected / new files at a glance
 
-| Datei | Stufe | Art |
+| File | Stage | Kind |
 |---|---|---|
-| `firmware/webfiles/viewer.html`, `viewer.js` | P0 | **neu** |
-| `firmware/webfiles/app.js` (Reiter) | P0 | Bestand (optional) |
-| `firmware/mcpsrv/mcp_pointer.py` | P1 | **neu** |
-| `firmware/device/main.py` | P1 | Bestand (eine Zeile) |
-| `firmware/mcpsrv/mcp_webui.py` (`/api/pointer`) | P1 | Bestand (additiv) |
-| `firmware/mcpsrv/mcp_screen.py` (`push_region`) | P2 | Bestand (additiv) |
-| `firmware/device/drivers/axs15231b.py` / `display_driver_framework.py` (Flush-Hook) | P2 | Bestand (klein) |
-| `firmware/mcpsrv/mcp_ws.py` (WS-Server, Port 81) | P2 | **neu** |
-| `tools/bench_vorschau.py` | Messung | **neu** (bereits angelegt) |
+| `firmware/webfiles/viewer.html`, `viewer.js` | P0 | **new** |
+| `firmware/webfiles/app.js` (tab) | P0 | existing (optional) |
+| `firmware/mcpsrv/mcp_pointer.py` | P1 | **new** |
+| `firmware/device/main.py` | P1 | existing (one line) |
+| `firmware/mcpsrv/mcp_webui.py` (`/api/pointer`) | P1 | existing (additive) |
+| `firmware/mcpsrv/mcp_screen.py` (`push_region`) | P2 | existing (additive) |
+| `firmware/device/drivers/axs15231b.py` / `display_driver_framework.py` (flush hook) | P2 | existing (small) |
+| `firmware/mcpsrv/mcp_ws.py` (WS server, port 81) | P2 | **new** |
+| `tools/bench_vorschau.py` | measurement | **new** (already created) |
 
 ---
 
-## 6. Risiken und offene Punkte
+## 6. Risks and open points
 
-* **Threadsicherheit (groesste Gefahr).** LVGL darf **nur** im Hauptthread angefasst
-  werden. Der Zeiger-Callback laeuft dort (gut); die Queue wird per Lock geteilt.
-  Jede Abkuerzung -- z. B. `lv.obj`-Aufrufe aus dem Server-Thread -- fuehrt zu
-  sporadischen Abstuerzen. Disziplin wie bei `mcp_screen.request()` beibehalten.
-* **Speicher.** Ein 307200-Byte-Sendepuffer muss in **PSRAM** liegen; der **interne
-  SRAM ist mit ~32 KB frei** praktisch voll. Bei mehreren Betrachtern (bis 4 Worker)
-  vorher rechnen: 4 x Vollbildpuffer = ~1,2 MB -- in PSRAM machbar, im internen SRAM
-  unmoeglich. Puffer **wiederverwenden** (Churn gemessen: ~0,4 MB je Runde).
-* **LVGL-Invalidate/Flush-Verhalten.** Der Delta-Nutzen haengt daran, dass der
-  Flush-`area` **wirklich klein** ist. Bei **Vollbild-Refresh** (dieses Panel braucht
-  vollen Bildwiederholaufbau mit gestuecktem Transfer ueber `SPIBusFast`) kann die
-  `area` **gross** ausfallen -- dann schrumpft der Delta-Vorteil. Vor P2 **messen**:
-  Groesse der `flush`-`area` bei typischen UI-Aenderungen protokollieren. Ist sie
-  dauerhaft ~Vollbild, bleibt nur Vollbild-Push (2,2 fps) oder SCALE im Browser.
-* **Tearing / Konsistenz.** Der Abzug liest den Framebuffer **waehrend** LVGL
-  schreibt. Fuer Vorschau unerheblich, fuer Delta-Rechtecke aus dem Flush aber
-  wichtig: dort den Puffer **im Flush-Moment kopieren**, nicht spaeter aus dem
-  Framebuffer (sonst reisst das Rechteck). Die Flush-`color_p`-Sicht ist der richtige
-  Ort.
-* **Verbindungs-Aufschlag (67 ms).** Bei Polling begrenzt er kleine Deltas hart
-  (12 fps-Decke fuer 80x60). Entweder **dauerhafter Kanal** (P2) oder bewusst
-  **Vollbild @ 2 fps**.
-* **WebSocket-Aufwand.** Handshake und Socket-Durchreichung sind Handarbeit; `asyncio`
-  und der Radio-Treiber teilen sich die CPU. Wenn eine Sitzung einen Worker dauerhaft
-  belegt, sinkt die Zahl gleichzeitiger Debug-Verbindungen -- Port 81/`/ws` getrennt
-  fuehren, damit der Debug-Server erreichbar bleibt.
-* **Aufsicht.** `mcp_serve._aufsicht` startet nur den **eigenen** Listener neu. Ein
-  zweiter WS-Listener braucht dieselbe Aufsicht, sonst stirbt er still (bekanntes
-  Muster: Board pingt, aber Port tot).
-* **Keine Authentifizierung.** Wie die bestehende Oberflaeche: beliebiger Code aus dem
-  Netz ausfuehrbar, jetzt **plus** aktive Bedienung des Panels. Nur vertrauenswuerdiges
-  LAN; idealerweise eine Not-Aus-Sperre ("Fernbedienung aus").
-* **Offene Frage Bildrate-Wahrnehmung.** Der Browser zeichnet nur so oft, wie `requestAnimationFrame`
-  laeuft (60 Hz) -- die echte Decke setzt das Netz. Bei Vollbild sind im Standbild
-  ~2 fps zu erwarten; fuer Animationen (Fortschrittsbalken) liefert erst P2 Fluessigkeit.
+* **Thread safety (biggest danger).** LVGL may **only** be touched in the main thread.
+  The pointer callback runs there (good); the queue is shared via a lock.
+  Any shortcut -- e.g. `lv.obj` calls from the server thread -- leads to
+  sporadic crashes. Keep the discipline as with `mcp_screen.request()`.
+* **Memory.** A 307200-byte send buffer must lie in **PSRAM**; the **internal
+  SRAM at ~32 KB free** is practically full. With several viewers (up to 4 workers)
+  compute beforehand: 4 x full-screen buffer = ~1.2 MB -- doable in PSRAM, impossible in
+  internal SRAM. **Reuse** buffers (churn measured: ~0.4 MB per round).
+* **LVGL invalidate/flush behaviour.** The delta benefit depends on the
+  flush `area` **really being small**. With **full-screen refresh** (this panel needs
+  a full frame rebuild with chunked transfer over `SPIBusFast`) the
+  `area` can turn out **large** -- then the delta advantage shrinks. **Measure** before P2:
+  log the size of the `flush` `area` for typical UI changes. If it is
+  permanently ~full screen, only full-screen push (2.2 fps) or SCALE in the browser remains.
+* **Tearing / consistency.** The capture reads the framebuffer **while** LVGL
+  writes. Irrelevant for preview, but important for delta rectangles from the flush:
+  there, copy the buffer **at the flush moment**, not later from the
+  framebuffer (otherwise the rectangle tears). The flush `color_p` view is the right
+  place.
+* **Connection overhead (67 ms).** With polling it limits small deltas hard
+  (12 fps ceiling for 80x60). Either a **persistent channel** (P2) or deliberately
+  **full screen @ 2 fps**.
+* **WebSocket effort.** Handshake and socket passing are manual work; `asyncio`
+  and the radio driver share the CPU. If a session permanently occupies a worker,
+  the number of simultaneous debug connections drops -- run port 81/`/ws` separately
+  so that the debug server stays reachable.
+* **Supervision.** `mcp_serve._aufsicht` restarts only the **own** listener. A
+  second WS listener needs the same supervision, otherwise it dies silently (known
+  pattern: board pings, but port dead).
+* **No authentication.** As with the existing interface: arbitrary code executable from the
+  network, now **plus** active operation of the panel. Only a trusted
+  LAN; ideally an emergency-off lock ("remote control off").
+* **Open question, frame-rate perception.** The browser only draws as often as `requestAnimationFrame`
+  runs (60 Hz) -- the real ceiling is set by the network. At full screen ~2 fps are to be expected
+  in the still image; for animations (progress bars) only P2 delivers fluidity.
 
 ---
 
-## Anhang: Rohdaten der Messung
+## Appendix: raw measurement data
 
 ```
-copy 307200 bytes: 37957 us (8.09 MB/s)          # bytearray(frame_buffer1)
-scan 480 rows (307200 B): 395049 us               # reiner Python-Zeilenvergleich
-gc_free=6313760 gc_alloc=410336                   # waehrend Messung
-internal heap frei: ~32031 Byte
+copy 307200 bytes: 37957 us (8.09 MB/s)           # bytearray(frame_buffer1)
+scan 480 rows (307200 B): 395049 us               # pure Python row comparison
+gc_free=6313760 gc_alloc=410336                   # during measurement
+internal heap free: ~32031 bytes
 
 scale=1 x10: 0.602 0.423 0.428 0.407 0.592 0.431 0.428 0.432 0.397 0.429
              mean 0.457 s -> 2.19 fps, ~657 KB/s
@@ -475,10 +472,10 @@ scale=4 x3 : 1.187 1.199 1.324 s
 scale=8 x3 : 0.391 0.381 0.387 s
 GET /screen x10: mean 0.067 s
 
-idle diff (2 Frames, 1 s Abstand): 0 geaenderte Pixel / 153600
+idle diff (2 frames, 1 s apart): 0 changed pixels / 153600
 
-Board-Features: websocket(extmod, Framing)  asyncio: ok  hashlib.sha1().digest(): ok
+Board features: websocket(extmod, framing)  asyncio: ok  hashlib.sha1().digest(): ok
                 ubinascii.b2a_base64: ok     _thread.allocate_lock: ok
-                deflate.DeflateIO: vorhanden
-Display: FULL-Render-Modus, 2 x 307200-B-Framebuffer, _flush_cb erhaelt area=Rechteck
+                deflate.DeflateIO: present
+Display: FULL-render mode, 2 x 307200-B framebuffers, _flush_cb receives area=rectangle
 ```

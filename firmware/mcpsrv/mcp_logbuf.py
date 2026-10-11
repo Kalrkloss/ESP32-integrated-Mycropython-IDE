@@ -1,5 +1,5 @@
-# stdout-Mitschnitt in einen Ringpuffer, damit der Debug-Server "Logs zeigen" kann.
-# Auf dem Geraet ersetzt ein Tee-Objekt sys.stdout; ohne Tee (Host-Test) bleibt es leer.
+# Capture stdout into a ring buffer so that the debug server can "show logs".
+# On the device a Tee object replaces sys.stdout; without a Tee (host test) it stays empty.
 
 try:
     import sys
@@ -27,11 +27,11 @@ class RingBuffer:
         return bytes(self.buf)
 
     def text(self, clear=False):
-        # MicroPython: bytes.decode() nimmt 'errors' nur positional
+        # MicroPython: bytes.decode() only accepts 'errors' positionally
         out = self.buf.decode("utf-8", "replace")
         prefix = ""
         if self.dropped:
-            prefix = "[%d Bytes verworfen]\n" % self.dropped
+            prefix = "[%d bytes discarded]\n" % self.dropped
         if clear:
             self.clear()
         return prefix + out
@@ -42,7 +42,7 @@ class RingBuffer:
 
 
 class Tee:
-    """Schreibt in das Original-stdout und zusaetzlich in den Ringpuffer."""
+    """Writes to the original stdout and additionally into the ring buffer."""
 
     def __init__(self, original, ring):
         self.original = original
@@ -75,14 +75,14 @@ RING = RingBuffer()
 
 
 def install(ring=None):
-    """Haengt den Mitschnitt vor sys.stdout (idempotent, robust wenn stdout fehlt)."""
+    """Puts the capture in front of sys.stdout (idempotent, robust if stdout is missing)."""
     ring = ring or RING
     out = getattr(sys, "stdout", None)
     if out is None or isinstance(out, Tee):
         return ring
     try:
         sys.stdout = Tee(out, ring)
-    except Exception:  # noqa: BLE001 - Mitschnitt ist optional, nie den Start verhindern
+    except Exception:  # noqa: BLE001 - the capture is optional, never prevent startup
         pass
     return ring
 
@@ -92,10 +92,11 @@ def logs(clear=False):
 
 
 def log(*args, **kwargs):
-    """Fuer Anwendungscode: in den Ringpuffer schreiben UND auf die Konsole.
+    """For application code: write into the ring buffer AND to the console.
 
-    Noetig, weil MicroPython-`print` direkt in den C-stdout schreibt -- davon sieht
-    der Ringpuffer (und damit das MCP-Tool `logs`) nichts."""
+    Needed because MicroPython `print` writes directly to the C stdout -- the ring
+    buffer (and thus the MCP tool `logs`) sees nothing of it.
+    """
     text = kwargs.get("sep", " ").join(str(a) for a in args)
     if kwargs.get("end", "\n") == "\n":
         text += "\n"

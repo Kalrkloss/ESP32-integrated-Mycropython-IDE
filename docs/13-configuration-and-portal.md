@@ -31,18 +31,31 @@ assignment. Two constraints shaped the result:
    legacy location and only fills empty fields.
 2. Configured (`configured` flag set **and** an SSID present) -> connect as station.
 3. Not configured -> `portal.SETUP_MODE = True` and open the access point.
-4. Configured but the connection fails within 20 s -> also open the access point.
-   The board stays reachable, the user fixes the configuration in the browser
-   instead of hunting for a cable.
+4. Configured but the join does **not** finish within 45 s -> stay in normal mode!
+   `boot.py` only sets `portal.STA_RETRY`; `main.py` retries the join every 15 s from
+   its main loop. Falling back to setup mode here was a mistake: a slow DHCP lease
+   then replaced the running application with a configuration page and restricted the
+   web UI, which looked exactly like a dead board with a black display.
+
+A wrong SSID or password therefore needs a cable (or a corrected `wifi.json`); the
+access point is reserved for a board that is really unconfigured.
 
 `main.py` then branches on `portal.SETUP_MODE`: in setup mode it starts the DNS
 hijack and a **restricted** server (see section 5) and shows a hint on the panel;
-otherwise it builds display, touch, the configured application and the full debug
-server.
+otherwise it builds display, touch, a bright splash, the configured application and
+the full debug server.
 
 Order inside setup mode matters: access point, DNS and server first, the display
 last. A wrong display configuration can block inside a C call, and the user must
 still be able to reach the setup page to correct it.
+
+### Visible screen at boot
+
+Every boot draws a bright splash (`show_splash`) for ~0.7 s and then the configured
+application; `launcher` uses a light theme. Reason: a dark application theme on a
+small panel is easily mistaken for a dead display, which is what happened here. The
+splash runs `main.pump()`, which drives `lv.tick_inc`/`lv.timer_handler` explicitly --
+a screen drawn before the main loop starts is otherwise not flushed to the panel.
 
 ## 3. Data model
 
@@ -109,7 +122,7 @@ The access point is **open**, therefore setup mode serves configuration only:
 | `/`, `/setup`, `/setup.js` | `/mcp` (MCP debug tools)            |
 | `/app.css`, `/favicon.ico` | `/api/exec` (code execution)        |
 | `/api/config` (GET/POST)   | `/api/file`, `/api/files` (files)   |
-| `/api/profiles`, `/api/drivers`, `/api/state`, `/api/reset` | `/editor/*` |
+| `/api/profiles`, `/api/drivers`, `/api/state`, `/api/log`, `/api/reset` | `/editor/*` |
 
 Anything else -- including `/api/exec` and `/api/files` -- lands on the redirect
 handler instead of the real one. The full UI has no authentication either; it is a
@@ -163,6 +176,20 @@ redirect itself is covered by the host tests and by the route table on the devic
 
 ## 8. Pitfalls (paid for once already)
 
+* **Predrawn screens need `main.pump()`.** A screen built before the main loop runs
+  (both the splash and the application) is flushed only when something drives LVGL's
+  timers; without it the panel keeps the previous frame.
+* **`/screen.raw` can be one frame behind the glass.** With two full framebuffers the
+  capture reads the buffer that `mcp_screen` attached to, while the panel shows the
+  other one. Never judge the glass from the raw buffer alone: `tools/camtext.py`
+  renders a webcam frame of the panel as a text brightness/colour map, which is the
+  reliable check (and the only one that also catches a dead backlight).
+* **A slow WiFi join must not change the mode.** See section 2: falling back to setup
+  mode on a timeout turned a running board into a configuration portal and looked like
+  a black display.
+* **A dark theme reads as a dead panel.** The first launcher version used `#101820`
+  with `#24384F` cards; measured through the camera the panel was lit but visually
+  black. Splash + light launcher fixed it.
 * **MicroPython has no `os.path` in this build.** `os.path.isdir` worked on the host
   and raised `AttributeError: 'module' object has no attribute 'path'` on the board.
   `available_drivers()` now recognises a directory by listability, and the host test

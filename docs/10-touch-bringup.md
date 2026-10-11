@@ -1,61 +1,61 @@
-# 10 -- Touch-Bring-up (AXS15231B, JC3248W535)
+# 10 -- Touch bring-up (AXS15231B, JC3248W535)
 
-Ergebnis: **Der Touch funktioniert.** Gemessen am laufenden System: 8419
-Treiberlesevorgänge in 300 s (~28 Hz), **262 erkannte Berührungspunkte** mit
-echten Koordinaten, UI-Zähler von `Touch: 0` auf `Touch: 1`.
+Result: **the touch works.** Measured on the running system: 8419
+driver reads in 300 s (~28 Hz), **262 detected touch points** with
+real coordinates, UI counter from `Touch: 0` to `Touch: 1`.
 
-Es waren **vier unabhängige Fehler** -- jeder einzelne reicht, damit der Touch
-tot wirkt:
+There were **four independent bugs** -- each one alone is enough for the touch
+to appear dead:
 
-## 1. LVGL bekam keinen Zeittakt (die eigentliche Hauptursache)
+## 1. LVGL received no time tick (the actual root cause)
 
-`lv.tick_get()` stand konstant auf 0. Ein `lv.timer_handler()` ohne fortlaufenden
-Takt führt **keinen einzigen Timer** aus -- deshalb wurde der Input-Treiber nie
-abgefragt (Messung: 0 Aufrufe von `_get_coords` in 60 s), es gab keine Animation
-und keinen Refresh. Das Panel zeigte trotzdem sein Bild, weil der Bustreiber den
-Framebuffer selbst wegschreibt -- das hat die Diagnose lange in die Irre geführt.
+`lv.tick_get()` stood constantly at 0. An `lv.timer_handler()` without a running
+tick executes **not a single timer** -- that is why the input driver was never
+polled (measurement: 0 calls of `_get_coords` in 60 s), there was no animation
+and no refresh. The panel still showed its image because the bus driver writes the
+framebuffer out itself -- that misled the diagnosis for a long time.
 
 ```python
 last_tick = time.ticks_ms()
 while True:
     now = time.ticks_ms()
-    lv.tick_inc(time.ticks_diff(now, last_tick))   # <-- fehlte
+    lv.tick_inc(time.ticks_diff(now, last_tick))   # <-- was missing
     last_tick = now
     lv.timer_handler()
     mcp_screen.service_requests()
     time.sleep_ms(5)
 ```
 
-Nach dem Fix: Takt läuft (20960 -> 21857), LVGL fragt den Treiber 41x in 1,5 s ab
+After the fix: the tick runs (20960 -> 21857), LVGL polls the driver 41x in 1.5 s
 (~27 Hz).
 
-## 2. `enable_input_priority()` legt den Touch still
+## 2. `enable_input_priority()` silences the touch
 
-Der Aufruf stammt aus der Referenzkonfiguration (`straga/micropython_lcd`) und
-schaltet den Indev auf `lv.INDEV_MODE.EVENT`. In `lv_indev.c` **pausiert
-`lv_indev_set_mode` dabei LVGLs eigenen Abfrage-Timer** und setzt auf den
-33-ms-Timer des Treibers. Faellt dessen Erzeugung aus (bei uns in einem
-`try/except pass` versteckt), wird der Touch nie gelesen.
+The call comes from the reference configuration (`straga/micropython_lcd`) and
+switches the indev to `lv.INDEV_MODE.EVENT`. In `lv_indev.c`, **`lv_indev_set_mode`
+thereby pauses LVGL's own polling timer** and relies on the 33-ms timer of the
+driver. If its creation fails (hidden in a `try/except pass` in our case),
+the touch is never read.
 
-Loesung: Aufruf entfernen, Standardmodus (TIMER, Wert 1) nutzen -- LVGL fragt
-selbst alle 33 ms ab.
+Solution: remove the call, use the default mode (TIMER, value 1) -- LVGL polls
+itself every 33 ms.
 
-## 3. GPIO 8 doppelt belegt: Display-DC = Touch-SCL
+## 3. GPIO 8 assigned twice: display DC = touch SCL
 
-Die Referenzkonfiguration uebergibt dem Display-Bus `dc=8` -- und GPIO 8 ist
-gleichzeitig der I2C-Takt des Touch. Messung: Ohne Display liest der Touch
-(noch) Konstanten, **mit initialisiertem Display bricht der Bus ab**
+The reference configuration passes `dc=8` to the display bus -- and GPIO 8 is
+at the same time the touch's I2C clock. Measurement: without display the touch
+reads (still) constants, **with the display initialised the bus aborts**
 (`OSError: [Errno 116] ETIMEDOUT`).
 
-Im QSPI-Modus braucht das Panel kein DC: Das Kommando steckt im Opcode
-(`0x02` Schreiben Kommando, `0x32` Schreiben Pixel). Das Hersteller-BSP uebergibt
-dementsprechend `NULL`. Loesung: `dc=-1` ("kein DC-Pin" in ESP-IDF).
-Danach bleibt der Touch-Bus nach der Display-Initialisierung benutzbar.
+In QSPI mode the panel needs no DC: the command is in the opcode
+(`0x02` write command, `0x32` write pixel). The vendor BSP accordingly passes
+`NULL`. Solution: `dc=-1` ("no DC pin" in ESP-IDF).
+After that the touch bus remains usable after the display initialisation.
 
-## 4. Reset-/Interrupt-Theorie war falsch (und wurde verworfen)
+## 4. The reset/interrupt theory was wrong (and was discarded)
 
-Zwischenzeitlich sah es so aus, als haenge der Controller im Reset (GPIO 12
-flottet auf LOW, `RST` imponierte die Datenlage). Das Hersteller-BSP sagt:
+At times it looked as though the controller were stuck in reset (GPIO 12
+floats to LOW, `RST` seemed to be the data situation). The vendor BSP says:
 
 ```c
 #define EXAMPLE_PIN_NUM_QSPI_TOUCH_RST  (-1)   // keine Reset-Leitung
@@ -64,50 +64,50 @@ flottet auf LOW, `RST` imponierte die Datenlage). Das Hersteller-BSP sagt:
 #define BSP_I2C_CLK_SPEED_HZ            400000
 ```
 
-GPIO 12 ist die SD-Karten-Taktleitung, GPIO 11 nicht der Touch-INT. Der
-Controller wird rein pollend gelesen. Unsere Konfiguration folgt jetzt den
-Herstellerwerten: **I2C-Port 0, 400 kHz, kein RST/INT**.
+GPIO 12 is the SD-card clock line, GPIO 11 not the touch INT. The
+controller is read purely by polling. Our configuration now follows the
+vendor values: **I2C port 0, 400 kHz, no RST/INT**.
 
-## Datenformat (zur Kontrolle)
+## Data format (for verification)
 
-Die Ruheantwort ist ein konstantes Byte-Muster -- **kein Fehler**, sondern
-"nichts beruehrt" (Byte 1 = Punktzahl; der Vendor-Code verwirft `> 1` genauso wie
-unser Treiber). Gemessen: `85 85 85 85 85 85 85 85` vor der ersten Beruehrung,
-danach `42 42 42 42 42 42 42 42`. Beide Muster sind Ruhe -- nicht als Defekt
-deuten. Ein echter Datensatz sieht so aus:
+The idle response is a constant byte pattern -- **not a fault**, but
+"nothing touched" (byte 1 = point count; the vendor code discards `> 1` just like
+our driver). Measured: `85 85 85 85 85 85 85 85` before the first touch,
+afterwards `42 42 42 42 42 42 42 42`. Both patterns are idle -- do not read them as a defect.
+A real data record looks like this:
 
 ```
 00 01 80 45 01 b4 38 39
  |  |  |  |  |  |  |  +-- y_l
- |  |  |  |  |  |  +----- y_h (nur untere 4 Bit)
- |  |  |  |  |  +-------- nicht benutzt
+ |  |  |  |  |  |  +----- y_h (only lower 4 bits)
+ |  |  |  |  |  +-------- unused
  |  |  |  |  +----------- x_l
- |  |  |  +-------------- x_h (untere 4 Bit) + Event-Bits (oben)
- |  |  +----------------- 1 = ein Beruehrungspunkt
- |  +-------------------- Punktzahl
- +----------------------- Gestik
+ |  |  |  +-------------- x_h (lower 4 bits) + event bits (top)
+ |  |  +----------------- 1 = one touch point
+ |  +-------------------- point count
+ +----------------------- gesture
 ```
 
-Dekodiert: x = 0x45 = 69, y = 0x1b4 = 436, Event "gedrueckt". Loslass-Frames
-beginnen mit `ff`, Ruhe mit `85`.
+Decoded: x = 0x45 = 69, y = 0x1b4 = 436, event "pressed". Release frames
+begin with `ff`, idle with `85`.
 
-## Pruefwerkzeuge (im Repo)
+## Test tools (in the repo)
 
-| Werkzeug | Zweck |
+| Tool | Purpose |
 |---|---|
-| `tools/touch_long.py [s]` | Lange Beobachtung: protokolliert jede von der Ruheantwort abweichende Antwort, erkannte Punkte und die UI-Beschriftung. Liest **nicht** selbst am I2C (zwei Leser am selben Geraet zerstoeren die Antworten). |
-| `tools/touch_probe_rst.py` | Reset-/INT-Variante (nur fuer andere Board-Revisionen sinnvoll). |
-| `tools/mcp_call.py <tool> [json]` | Einzelner MCP-Aufruf, auch fuer `exec_python`. |
-| `firmware/device/probe_touch*.py` | Isolierte Bring-up-Proben (ohne/mit Display, Bustakt, Leselaenge, Kommandovarianten, Registerzugriff). |
+| `tools/touch_long.py [s]` | long observation: logs every response deviating from the idle response, detected points and the UI label. Does **not** itself read on I2C (two readers on the same device destroy the responses). |
+| `tools/touch_probe_rst.py` | reset/INT variant (only sensible for other board revisions). |
+| `tools/mcp_call.py <tool> [json]` | single MCP call, also for `exec_python`. |
+| `firmware/device/probe_touch*.py` | isolated bring-up probes (without/with display, bus clock, read length, command variants, register access). |
 
-## Was ausgeschlossen wurde
+## What was ruled out
 
-* **Kommandoprotokoll:** identisch in allen Referenzen (11 Byte
-  `b5 ab a5 5a 00 00 00 08 00 00 00`, danach 8 Byte lesen).
-* **Zugriffsschicht:** `i2c`-Modul und `machine.I2C` liefern identisch -- die
-  Softwareschicht ist es nicht.
-* **Bustakt / Leselaenge / Kommandovarianten / Registerzugriff / Wartezeiten:**
-  durchgetestet, kein Unterschied.
-* **Hardware:** Die Demosoftware des Herstellers kann Touch -- die Hardware ist
-  in Ordnung. Die Angaben aus dem Hersteller-BSP (Pins, I2C-Port, kein DC) waren
-  am Ende der Schluessel.
+* **Command protocol:** identical in all references (11 bytes
+  `b5 ab a5 5a 00 00 00 08 00 00 00`, then read 8 bytes).
+* **Access layer:** `i2c` module and `machine.I2C` deliver identically -- the
+  software layer is not it.
+* **Bus clock / read length / command variants / register access / wait times:**
+  tested through, no difference.
+* **Hardware:** the vendor's demo software can do touch -- the hardware is
+  fine. The details from the vendor BSP (pins, I2C port, no DC) were
+  the key in the end.

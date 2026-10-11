@@ -1,46 +1,46 @@
-# Vorgesehene BASIC-Kommandos
+# Intended BASIC commands
 
-Angelehnt an die Namensgebung der Annex-RDS-Firmware (`SOUND.*`, `PLAY.*`), damit
-bestehende Programme leicht portierbar sind. Punktnamen wie in Annex üblich; alle
-Kommandos blockieren nicht und liefern einen Rückgabecode.
+Modeled on the naming of the Annex-RDS firmware (`SOUND.*`, `PLAY.*`), so that
+existing programs are easily portable. Dotted names as usual in Annex; all
+commands are non-blocking and return a return code.
 
-## Gerät & Status
+## Device & status
 
-| Kommando | Bedeutung |
+| Command | Meaning |
 |---|---|
-| `USB.SOUND.INIT [rate]` | USB-Host-Stack + UAC-Treiber starten; optional Abtastrate (z. B. 48000) |
-| `USB.SOUND.DEVICE$` | Beschreibung der erkannten Soundkarte (Hersteller/Produkt), leer wenn keine |
-| `USB.SOUND.STATE` | 0 = gestoppt, 1 = bereit, 2 = läuft, negativ = Fehler |
-| `USB.SOUND.FORMAT` | aktive Rate/Bit/Kanäle (z. B. 48000/16/2) |
-| `USB.SOUND.CLOSE` | Gerät schließen, USB-Host stoppen |
+| `USB.SOUND.INIT [rate]` | start USB host stack + UAC driver; optional sample rate (e.g. 48000) |
+| `USB.SOUND.DEVICE$` | description of the detected sound card (vendor/product), empty if none |
+| `USB.SOUND.STATE` | 0 = stopped, 1 = ready, 2 = running, negative = error |
+| `USB.SOUND.FORMAT` | active rate/bits/channels (e.g. 48000/16/2) |
+| `USB.SOUND.CLOSE` | close device, stop USB host |
 
-## Wiedergabe
+## Playback
 
-| Kommando | Bedeutung |
+| Command | Meaning |
 |---|---|
-| `USB.SOUND.VOLUME v` | Lautstärke 0–100 (an die Soundkarte gemeldet, falls Feature-Unit vorhanden) |
-| `USB.SOUND.MUTE on` | Stummschalten |
-| `PLAY.USB file$ [,rate]` | Datei (WAV/MP3/PCM) über die USB-Soundkarte ausgeben |
-| `PLAY.STREAM_USB url$` | Stream über die USB-Soundkarte ausgeben |
-| `USB.SOUND.TONE freq, ms [,vol]` | Testton — erstes Prüfkommando für Aufbau und Verkabelung |
-| `USB.SOUND.WRITE iobuf$` | rohes PCM aus dem IO-Puffer senden |
+| `USB.SOUND.VOLUME v` | volume 0–100 (reported to the sound card if a feature unit is present) |
+| `USB.SOUND.MUTE on` | mute |
+| `PLAY.USB file$ [,rate]` | output file (WAV/MP3/PCM) via the USB sound card |
+| `PLAY.STREAM_USB url$` | output stream via the USB sound card |
+| `USB.SOUND.TONE freq, ms [,vol]` | test tone — first check command for assembly and wiring |
+| `USB.SOUND.WRITE iobuf$` | send raw PCM from the IO buffer |
 
-## Aufnahme
+## Recording
 
-| Kommando | Bedeutung |
+| Command | Meaning |
 |---|---|
-| `USB.SOUND.MIC.LEVEL` | aktueller Eingangspegel (0–100) |
-| `USB.SOUND.REC file$ [,seconds]` | Mikrofon der Soundkarte in Datei aufnehmen (WAV) |
-| `USB.SOUND.READ iobuf$` | rohes PCM in den IO-Puffer lesen |
+| `USB.SOUND.MIC.LEVEL` | current input level (0–100) |
+| `USB.SOUND.REC file$ [,seconds]` | record the sound card's microphone to a file (WAV) |
+| `USB.SOUND.READ iobuf$` | read raw PCM into the IO buffer |
 
-## Ereignisse
+## Events
 
-| Kommando | Bedeutung |
+| Command | Meaning |
 |---|---|
-| `USB.SOUND.ONERROR label$` | Sprungziel bei Hotplug/Fehler (Gerät entfernt, Format nicht unterstützt) |
+| `USB.SOUND.ONERROR label$` | jump target on hotplug/error (device removed, format not supported) |
 
-## Nicht geplant (Gegenrichtung)
+## Not planned (opposite direction)
 
-Wenn die S3 selbst als USB-Soundkarte am PC erscheinen soll, wäre das eine eigene
-Kommandofamilie (z. B. `USB.DEVICE.INIT`), umgesetzt mit dem TinyUSB-Device-Stack
-(`esp_device_uac`) statt mit dem Host-Treiber.
+If the S3 itself is to appear as a USB sound card on the PC, that would be its own
+command family (e.g. `USB.DEVICE.INIT`), implemented with the TinyUSB device stack
+(`esp_device_uac`) instead of with the host driver.

@@ -1,15 +1,15 @@
-# Web-Oberflaeche des Debug-Servers: Konsole (REPL), Codeeditor, Dateimanager, Konfiguration.
+# Web UI of the debug server: console (REPL), code editor, file manager, configuration.
 #
-# Bewusste Entscheidungen:
-#   * Reines HTML/CSS/JS ohne externe Abhaengigkeiten -- der Browser holt nichts aus
-#     dem Netz, die Seite funktioniert also auch ohne Internet.
-#   * Eine einzige Seite mit Reitern statt vier Seiten: weniger Uebertragung, und der
-#     Editorinhalt bleibt beim Wechseln erhalten.
-#   * Texte auf Deutsch, Code-Kommentare auf Englisch (Projektkonvention).
-#   * KEINE Authentifizierung. Das UI ist ein Debug-Werkzeug fuer das eigene LAN.
+# Deliberate decisions:
+#   * Pure HTML/CSS/JS without external dependencies -- the browser fetches nothing
+#     from the network, so the page works without internet too.
+#   * A single page with tabs instead of four pages: less transfer, and the editor
+#     content is preserved when switching.
+#   * All texts in English (project convention).
+#   * NO authentication. The UI is a debug tool for your own LAN.
 #
-# Alle Dateizugriffe laufen ueber ROOT -- die Host-Tests setzen dort ein temporaeres
-# Verzeichnis und pruefen dieselben Handler wie das Geraet.
+# All file accesses go through ROOT -- the host tests set a temporary directory
+# there and exercise the same handlers as the device.
 
 import json
 import os
@@ -21,75 +21,75 @@ import mcp_screen
 import mcp_tools
 import portal
 
-ROOT = ""                                     # "" = Geraetewurzel; Host-Test: tmp-Verzeichnis
-CONFIG_FILE = "config.json"                   # WLAN + Anzeige + Geraetename
+ROOT = ""                                     # "" = device root; host test: tmp directory
+CONFIG_FILE = "config.json"                   # WLAN + display + device name
 MAX_UPLOAD = 1024 * 1024
 TEXT_SUFFIXES = (".py", ".json", ".txt", ".md", ".csv", ".html", ".css", ".js", ".cfg", ".ini")
 BINARY_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".bin", ".uf2", ".z", ".deflate")
 
 
-# ---------------------------------------------------------------- Dateizugriff
+# ---------------------------------------------------------------- File access
 
 def real_path(path):
-    """Pfadangabe des Browsers in einen echten Pfad umsetzen (ohne Ausbruch aus ROOT)."""
+    """Turn a path given by the browser into a real path (without escaping ROOT)."""
     path = (path or "/").strip() or "/"
     if not path.startswith("/"):
         path = "/" + path
-    # ".." neutralisieren, damit niemand aus ROOT ausbricht
-    teile = [p for p in path.split("/") if p not in ("", ".")]
-    sauber = []
-    for teil in teile:
-        if teil == "..":
-            if sauber:
-                sauber.pop()
+    # neutralize ".." so nobody escapes ROOT
+    parts = [p for p in path.split("/") if p not in ("", ".")]
+    clean = []
+    for part in parts:
+        if part == "..":
+            if clean:
+                clean.pop()
             continue
-        sauber.append(teil)
-    return ROOT + "/" + "/".join(sauber)
+        clean.append(part)
+    return ROOT + "/" + "/".join(clean)
 
 
-def ist_verzeichnis(pfad):
+def is_dir(path):
     try:
-        return (os.stat(pfad)[0] & 0x4000) != 0
+        return (os.stat(path)[0] & 0x4000) != 0
     except OSError:
         return False
 
 
-def datei_eintraege(path):
-    """Verzeichnis auflisten: Name, Groesse, Verzeichnis-Kennzeichen."""
-    ziel = real_path(path)
-    namen = os.listdir(ziel)
-    eintraege = []
-    for name in sorted(namen):
-        voll = ziel.rstrip("/") + "/" + name
-        versuch = None
+def dir_entries(path):
+    """List a directory: name, size, directory flag."""
+    target = real_path(path)
+    names = os.listdir(target)
+    entries = []
+    for name in sorted(names):
+        full = target.rstrip("/") + "/" + name
+        stat = None
         try:
-            versuch = os.stat(voll)
+            stat = os.stat(full)
         except OSError:
             pass
-        if versuch is None:
-            eintraege.append({"name": name, "size": 0, "dir": False, "unbekannt": True})
+        if stat is None:
+            entries.append({"name": name, "size": 0, "dir": False, "unbekannt": True})
             continue
-        eintraege.append({
+        entries.append({
             "name": name,
-            "size": versuch[6],
-            "dir": (versuch[0] & 0x4000) != 0,
+            "size": stat[6],
+            "dir": (stat[0] & 0x4000) != 0,
         })
-    # Verzeichnisse zuerst
-    eintraege.sort(key=lambda e: (not e["dir"], e["name"].lower()))
-    return eintraege
+    # directories first
+    entries.sort(key=lambda e: (not e["dir"], e["name"].lower()))
+    return entries
 
 
-def speicher_info():
+def memory_info():
     try:
         st = os.statvfs(ROOT + "/")
-        return {"frei": st[0] * st[3], "gesamt": st[0] * st[2]}
+        return {"free": st[0] * st[3], "total": st[0] * st[2]}
     except OSError:
         return {}
 
 
-# ---------------------------------------------------------------- Konfiguration
+# ---------------------------------------------------------------- Configuration
 
-STANDARD_CONFIG = {
+DEFAULT_CONFIG = {
     "ssid": "",
     "password": "",
     "hostname": "esp32-debug",
@@ -98,7 +98,7 @@ STANDARD_CONFIG = {
 }
 
 
-def _wifi_json_lesen():
+def _read_wifi_json():
     try:
         with open(real_path("/wifi.json")) as fh:
             return json.load(fh)
@@ -116,7 +116,7 @@ def config_lesen(mit_passwort=False):
     """
     display_config.ROOT = ROOT
     cfg = display_config.load_config()
-    legacy = _wifi_json_lesen()
+    legacy = _read_wifi_json()
     for key in ("ssid", "hostname"):
         if not cfg.get(key) and legacy.get(key):
             cfg[key] = legacy[key]
@@ -128,36 +128,36 @@ def config_lesen(mit_passwort=False):
     return cfg
 
 
-def config_schreiben(daten):
+def config_schreiben(data):
     """Store the configuration. An empty password field deletes nothing."""
     display_config.ROOT = ROOT
-    return config_lesen() if not daten else display_config.save_config(daten)
+    return config_lesen() if not data else display_config.save_config(data)
 
 
-# ---------------------------------------------------------------- API-Handler
+# ---------------------------------------------------------------- API handlers
 
 def api_state(req):
     info = mcp_tools.tool_device_info()
-    antwort = {
+    response = {
         "ip": None,
         "heap": info.get("gc_free"),
         "uptime_s": info.get("uptime_s"),
         "freq_mhz": info.get("freq_mhz"),
         "wifi": info.get("wifi"),
         "screen": mcp_screen.describe(),
-        "speicher": speicher_info(),
+        "memory": memory_info(),
     }
     try:
         wlan = info.get("wifi") or {}
         if isinstance(wlan, dict) and wlan.get("ifconfig"):
-            antwort["ip"] = wlan["ifconfig"][0]
+            response["ip"] = wlan["ifconfig"][0]
     except Exception:  # noqa: BLE001
         pass
-    return mcp_httpd.json_response(antwort)
+    return mcp_httpd.json_response(response)
 
 
 def api_exec(req):
-    """Code ausfuehren. Body: JSON {"code": "..."} oder reiner Text."""
+    """Run code. Body: JSON {"code": "..."} or plain text."""
     if req.body:
         text = req.body.decode("utf-8", "replace") if hasattr(req.body, "decode") else str(req.body)
     else:
@@ -168,13 +168,13 @@ def api_exec(req):
         except ValueError:
             pass
     if not text:
-        return mcp_httpd.json_response({"ok": False, "output": "kein Code uebergeben"}, 400)
+        return mcp_httpd.json_response({"ok": False, "output": "no code given"}, 400)
     try:
-        ausgabe = mcp_tools.tool_exec(text)
+        output = mcp_tools.tool_exec(text)
     except Exception as exc:  # noqa: BLE001
         return mcp_httpd.json_response(
             {"ok": False, "output": "%s: %s" % (type(exc).__name__, exc)}, 500)
-    return mcp_httpd.json_response({"ok": True, "output": ausgabe})
+    return mcp_httpd.json_response({"ok": True, "output": output})
 
 
 def api_log(req):
@@ -183,129 +183,129 @@ def api_log(req):
 
 def api_files(req):
     try:
-        eintraege = datei_eintraege(req.arg("path", "/"))
+        entries = dir_entries(req.arg("path", "/"))
     except OSError as exc:
         return mcp_httpd.json_response({"error": "listdir: %s" % exc, "path": req.arg("path", "/")}, 404)
     return mcp_httpd.json_response({
         "path": req.arg("path", "/"),
-        "entries": eintraege,
-        "speicher": speicher_info(),
+        "entries": entries,
+        "memory": memory_info(),
     })
 
 
 def api_file_get(req):
-    pfad = req.arg("path")
-    if not pfad:
-        return mcp_httpd.json_response({"error": "path fehlt"}, 400)
-    ziel = real_path(pfad)
+    path = req.arg("path")
+    if not path:
+        return mcp_httpd.json_response({"error": "path missing"}, 400)
+    target = real_path(path)
     try:
-        with open(ziel, "rb") as fh:
-            daten = fh.read()
+        with open(target, "rb") as fh:
+            data = fh.read()
     except OSError as exc:
-        return mcp_httpd.json_response({"error": "lesen: %s" % exc}, 404)
+        return mcp_httpd.json_response({"error": "read: %s" % exc}, 404)
     if req.arg("download") == "1":
-        name = ziel.rsplit("/", 1)[-1]
-        return mcp_httpd.Response(200, daten, {
+        name = target.rsplit("/", 1)[-1]
+        return mcp_httpd.Response(200, data, {
             "Content-Type": "application/octet-stream",
             "Content-Disposition": 'attachment; filename="%s"' % name,
         })
     try:
-        return mcp_httpd.json_response({"path": pfad, "data": daten.decode("utf-8"), "binary": False})
+        return mcp_httpd.json_response({"path": path, "data": data.decode("utf-8"), "binary": False})
     except UnicodeError:
         return mcp_httpd.json_response(
-            {"path": pfad, "binary": True, "size": len(daten),
-             "hinweis": "Binaerdatei -- nur Download"}, 200)
+            {"path": path, "binary": True, "size": len(data),
+             "hinweis": "binary file -- download only"}, 200)
 
 
 def api_file_put(req):
-    """Datei schreiben. Body = Inhalt (roh), Pfad ueber ?path= oder JSON {"path","data"}."""
-    pfad = req.arg("path")
-    daten = req.body or b""
-    if not pfad and daten[:1] == b"{":
+    """Write a file. Body = content (raw), path via ?path= or JSON {"path","data"}."""
+    path = req.arg("path")
+    data = req.body or b""
+    if not path and data[:1] == b"{":
         try:
-            nutzlast = json.loads(daten.decode("utf-8"))
-            pfad = nutzlast.get("path")
-            daten = nutzlast.get("data", "").encode("utf-8")
+            payload = json.loads(data.decode("utf-8"))
+            path = payload.get("path")
+            data = payload.get("data", "").encode("utf-8")
         except ValueError:
-            return mcp_httpd.json_response({"error": "JSON unlesbar"}, 400)
-    if not pfad:
-        return mcp_httpd.json_response({"error": "path fehlt"}, 400)
-    if len(daten) > MAX_UPLOAD:
-        return mcp_httpd.json_response({"error": "zu gross (max %d)" % MAX_UPLOAD}, 413)
-    ziel = real_path(pfad)
-    eltern = ziel.rsplit("/", 1)[0]
-    if eltern and not ist_verzeichnis(eltern):
+            return mcp_httpd.json_response({"error": "JSON unreadable"}, 400)
+    if not path:
+        return mcp_httpd.json_response({"error": "path missing"}, 400)
+    if len(data) > MAX_UPLOAD:
+        return mcp_httpd.json_response({"error": "too large (max %d)" % MAX_UPLOAD}, 413)
+    target = real_path(path)
+    parent = target.rsplit("/", 1)[0]
+    if parent and not is_dir(parent):
         try:
-            os.mkdir(eltern)
+            os.mkdir(parent)
         except OSError:
             pass
     try:
-        with open(ziel, "wb") as fh:
-            fh.write(daten)
+        with open(target, "wb") as fh:
+            fh.write(data)
     except OSError as exc:
-        return mcp_httpd.json_response({"error": "schreiben: %s" % exc}, 500)
-    return mcp_httpd.json_response({"ok": True, "path": pfad, "bytes": len(daten)})
+        return mcp_httpd.json_response({"error": "write: %s" % exc}, 500)
+    return mcp_httpd.json_response({"ok": True, "path": path, "bytes": len(data)})
 
 
 def api_file_delete(req):
-    daten = req.json()
-    pfad = daten.get("path")
-    if not pfad:
-        return mcp_httpd.json_response({"error": "path fehlt"}, 400)
-    ziel = real_path(pfad)
+    data = req.json()
+    path = data.get("path")
+    if not path:
+        return mcp_httpd.json_response({"error": "path missing"}, 400)
+    target = real_path(path)
     try:
-        if ist_verzeichnis(ziel):
-            os.rmdir(ziel)
+        if is_dir(target):
+            os.rmdir(target)
         else:
-            os.remove(ziel)
+            os.remove(target)
     except OSError as exc:
-        return mcp_httpd.json_response({"error": "loeschen: %s" % exc}, 500)
-    return mcp_httpd.json_response({"ok": True, "path": pfad})
+        return mcp_httpd.json_response({"error": "delete: %s" % exc}, 500)
+    return mcp_httpd.json_response({"ok": True, "path": path})
 
 
 def api_file_mkdir(req):
-    daten = req.json()
-    pfad = daten.get("path")
-    if not pfad:
-        return mcp_httpd.json_response({"error": "path fehlt"}, 400)
+    data = req.json()
+    path = data.get("path")
+    if not path:
+        return mcp_httpd.json_response({"error": "path missing"}, 400)
     try:
-        os.mkdir(real_path(pfad))
+        os.mkdir(real_path(path))
     except OSError as exc:
         return mcp_httpd.json_response({"error": "mkdir: %s" % exc}, 500)
-    return mcp_httpd.json_response({"ok": True, "path": pfad})
+    return mcp_httpd.json_response({"ok": True, "path": path})
 
 
 def api_file_rename(req):
-    daten = req.json()
-    alt, neu = daten.get("old"), daten.get("new")
-    if not alt or not neu:
-        return mcp_httpd.json_response({"error": "old/new fehlt"}, 400)
-    ziel = real_path(neu)
+    data = req.json()
+    old, new = data.get("old"), data.get("new")
+    if not old or not new:
+        return mcp_httpd.json_response({"error": "old/new missing"}, 400)
+    target = real_path(new)
     try:
-        os.rename(real_path(alt), ziel)
+        os.rename(real_path(old), target)
     except OSError as exc:
-        return mcp_httpd.json_response({"error": "umbenennen: %s" % exc}, 500)
-    return mcp_httpd.json_response({"ok": True, "path": neu})
+        return mcp_httpd.json_response({"error": "rename: %s" % exc}, 500)
+    return mcp_httpd.json_response({"ok": True, "path": new})
 
 
 def api_config(req):
     if req.method == "POST":
-        daten = req.json()
-        if not isinstance(daten, dict):
-            return mcp_httpd.json_response({"error": "Objekt erwartet"}, 400)
+        data = req.json()
+        if not isinstance(data, dict):
+            return mcp_httpd.json_response({"error": "object expected"}, 400)
         try:
-            cfg = config_schreiben(daten)
+            cfg = config_schreiben(data)
         except OSError as exc:
-            return mcp_httpd.json_response({"error": "speichern: %s" % exc}, 500)
+            return mcp_httpd.json_response({"error": "save: %s" % exc}, 500)
         return mcp_httpd.json_response({"ok": True, "config": cfg})
     return mcp_httpd.json_response({"config": config_lesen()})
 
 
 def api_screen(req):
     scale = int(req.arg("scale", "2"))
-    daten, breite, hoehe, swap = mcp_screen.capture(scale=scale)
+    data, width, height, swap = mcp_screen.capture(scale=scale)
     from mcp_png import encode_rgb565_png
-    blob = encode_rgb565_png(daten, breite, hoehe, byte_swap=swap)
+    blob = encode_rgb565_png(data, width, height, byte_swap=swap)
     return mcp_httpd.Response(200, blob, {"Content-Type": "image/png",
                                           "Cache-Control": "no-store"})
 
@@ -332,6 +332,41 @@ def portal_redirect(req):
     return portal.redirect_to_setup(req)
 
 
+def _app_loader():
+    """app_loader imports LVGL, which does not exist on a host -- import lazily."""
+    import app_loader
+    return app_loader
+
+
+def api_apps(req):
+    """Applications present on the device (from /apps)."""
+    try:
+        loader = _app_loader()
+    except ImportError as exc:
+        return mcp_httpd.json_response({"apps": [], "error": str(exc)})
+    return mcp_httpd.json_response({"apps": loader.list_apps(include_launcher=True),
+                                    "running": loader.running_app()})
+
+
+def api_app(req):
+    """Switch the running application at runtime (serviced in the LVGL thread)."""
+    if req.method != "POST":
+        return mcp_httpd.json_response({"error": "POST expected"}, 405)
+    data = req.json()
+    name = (data or {}).get("name") if isinstance(data, dict) else None
+    if not name:
+        return mcp_httpd.json_response({"error": "name missing"}, 400)
+    try:
+        loader = _app_loader()
+    except ImportError as exc:
+        return mcp_httpd.json_response({"error": str(exc)}, 503)
+    if name not in loader.app_names():
+        return mcp_httpd.json_response({"error": "unknown application: %s" % name}, 404)
+    loader.request_app(name)
+    return mcp_httpd.json_response({"ok": True, "requested": name,
+                                    "running": loader.running_app()})
+
+
 def setup_routes():
     """Restricted route table for setup mode.
 
@@ -352,6 +387,7 @@ def setup_routes():
         "GET /api/drivers": api_drivers,
         "GET /api/state": api_state,
         "POST /api/reset": api_reset,
+        "GET /api/log": api_log,          # diagnosis: did the boot fall back to setup?
         "GET *": portal_redirect,
         "POST *": portal_redirect,
         "PUT *": portal_redirect,
@@ -374,7 +410,9 @@ def build_routes():
         "GET /app.js": statisch("app.js"),
         "GET /api/drivers": api_drivers,
         "GET /api/profiles": api_profiles,
-        "GET /editor/*": web_baum,          # mitgelieferter Codeeditor (CodeMirror)
+        "GET /api/apps": api_apps,
+        "POST /api/app": api_app,
+        "GET /editor/*": web_tree,          # bundled code editor (CodeMirror)
         "GET /favicon.ico": favicon,
         "GET /api/state": api_state,
         "POST /api/exec": api_exec,
@@ -394,62 +432,62 @@ def build_routes():
 
 
 def status_route(req):
-    """Klartext-Status -- bleibt fuer den schnellen Blick mit curl erhalten."""
+    """Plain-text status -- kept for a quick look with curl."""
     return mcp_httpd.text(200, "esp32 debug server\n%s\nUI: http://<ip>/\ntools:\n%s\n" % (
         mcp_screen.describe(),
         "\n".join("  %s" % t.name for t in mcp_tools.build_tools())))
 
 
-def seite(req):
-    """Kompatibilitaet: "/" liefert die Startseite der Oberflaeche."""
+def page(req):
+    """Compatibility: "/" serves the start page of the UI."""
     return statisch("index.html")(req)
 
 
-# ---------------------------------------------------------------- Dateien der Oberflaeche
+# ---------------------------------------------------------------- UI files
 
-# HTML, CSS und JS liegen als echte Dateien in firmware/webfiles/ (auf dem Geraet: /web).
-# Grund: im Python-String entstehen sonst Escaping-Fehler -- in der ersten Fassung wurden
-# aus "\n" in JS-Strings echte Zeilenumbrueche, wodurch das ganze Skript nicht mehr
-# geparst wurde und die Oberflaeche ohne Funktion blieb. Ausserdem sind die Dateien so
-# ueber den Dateimanager editierbar.
+# HTML, CSS and JS live as real files in firmware/webfiles/ (on the device: /web).
+# Reason: inside a Python string escaping errors otherwise arise -- in the first
+# version, "\n" in JS strings became real line breaks, so the whole script could no
+# longer be parsed and the UI stayed without function. Besides, the files are thus
+# editable via the file manager.
 
 WEB_DIR = "web"
-TYPEN = {".html": "text/html; charset=utf-8",
-         ".css": "text/css; charset=utf-8",
-         ".js": "application/javascript; charset=utf-8",
-         ".txt": "text/plain; charset=utf-8",
-         ".png": "image/png",
-         ".svg": "image/svg+xml; charset=utf-8",
-         ".json": "application/json"}
+CONTENT_TYPES = {".html": "text/html; charset=utf-8",
+                 ".css": "text/css; charset=utf-8",
+                 ".js": "application/javascript; charset=utf-8",
+                 ".txt": "text/plain; charset=utf-8",
+                 ".png": "image/png",
+                 ".svg": "image/svg+xml; charset=utf-8",
+                 ".json": "application/json"}
 
 
-def web_datei_lesen(name):
+def read_web_file(name):
     with open(ROOT + "/" + WEB_DIR + "/" + name, "rb") as fh:
         return fh.read()
 
 
 def content_type(name):
-    for endung, typ in TYPEN.items():
-        if name.endswith(endung):
-            return typ
+    for suffix, ctype in CONTENT_TYPES.items():
+        if name.endswith(suffix):
+            return ctype
     return "application/octet-stream"
 
 
 def statisch(name):
-    """Auslieferer fuer eine Datei der Oberflaeche (ohne Cache -- Aenderungen im
-    Dateimanager sollen sofort wirken). Der Inhalt wird gestueckt gesendet."""
+    """Server for a UI file (without cache -- changes in the file manager should
+    take effect immediately). The content is sent in chunks."""
 
     def handler(req):
-        ziel = ROOT + "/" + WEB_DIR + "/" + name
+        target = ROOT + "/" + WEB_DIR + "/" + name
         try:
-            with open(ziel, "rb"):
+            with open(target, "rb"):
                 pass
         except OSError as exc:
             return mcp_httpd.text(
-                500, "%s fehlt auf dem Geraet (%s)\\n-- firmware/webfiles/ mit deploy.sh kopieren"
+                500, "%s missing on the device (%s)\n-- copy firmware/webfiles/ with deploy.sh"
                 % (name, exc))
         return mcp_httpd.Response(200, b"", {"Content-Type": content_type(name),
-                                            "Cache-Control": "no-store"}, datei=ziel)
+                                            "Cache-Control": "no-store"}, datei=target)
     return handler
 
 
@@ -457,21 +495,21 @@ def favicon(req):
     return mcp_httpd.Response(204, b"", {})
 
 
-def web_baum(req):
-    """Dateien des mitgelieferten Editors ausliefern (Praefix-Route /editor/*).
+def web_tree(req):
+    """Serve files of the bundled editor (prefix route /editor/*).
 
-    Der Pfad kommt vom Browser und wird deshalb streng geprueft: nur der Baum
-    <WEB_DIR>/editor, und kein ".." darin.
+    The path comes from the browser and is therefore checked strictly: only the tree
+    <WEB_DIR>/editor, and no ".." inside it.
     """
     name = req.path.lstrip("/")
-    erlaubt = name.startswith("editor/") and ".." not in name and "//" not in name
-    if not erlaubt:
-        return mcp_httpd.text(403, "Pfad nicht erlaubt")
-    ziel = ROOT + "/" + WEB_DIR + "/" + name
+    allowed = name.startswith("editor/") and ".." not in name and "//" not in name
+    if not allowed:
+        return mcp_httpd.text(403, "path not allowed")
+    target = ROOT + "/" + WEB_DIR + "/" + name
     try:
-        with open(ziel, "rb"):
+        with open(target, "rb"):
             pass
     except OSError as exc:
-        return mcp_httpd.text(404, "%s nicht gefunden (%s)" % (name, exc))
+        return mcp_httpd.text(404, "%s not found (%s)" % (name, exc))
     return mcp_httpd.Response(200, b"", {"Content-Type": content_type(name),
-                                         "Cache-Control": "no-store"}, datei=ziel)
+                                         "Cache-Control": "no-store"}, datei=target)

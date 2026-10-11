@@ -1,7 +1,7 @@
-"""Host-Tests fuer den Debug-MCP-Server (laeuft ohne ESP32, mit CPython).
+"""Host tests for the debug MCP server (runs without an ESP32, under CPython).
 
-Geprueft werden: PNG-Encoder, JSON-RPC/MCP-Kern, HTTP-Layer, Screenshot-Tool.
-Aufruf:  python3 tests/test_mcpsrv.py
+Checked here: PNG encoder, JSON-RPC/MCP core, HTTP layer, screenshot tool.
+Run:  python3 tests/test_mcpsrv.py
 """
 
 import json
@@ -46,7 +46,7 @@ def rgb565(r, g, b, byte_swap=True):
 
 
 def synthetic_screen(w=8, h=4, byte_swap=True):
-    """Zwei Farben in Bloecken -- gut geeignet, um Zeilen-/Byte-Reihenfolge zu pruefen."""
+    """Two colors in blocks -- well suited to checking row/byte order."""
     buf = bytearray()
     for y in range(h):
         for x in range(w):
@@ -58,7 +58,7 @@ def synthetic_screen(w=8, h=4, byte_swap=True):
 
 
 def parse_png(blob):
-    assert blob[:8] == b"\x89PNG\r\n\x1a\n", "PNG-Signatur fehlt"
+    assert blob[:8] == b"\x89PNG\r\n\x1a\n", "PNG signature missing"
     pos = 8
     chunks = {}
     while pos < len(blob):
@@ -66,7 +66,7 @@ def parse_png(blob):
         tag = blob[pos + 4:pos + 8]
         data = blob[pos + 8:pos + 8 + length]
         crc = struct.unpack(">I", blob[pos + 8 + length:pos + 12 + length])[0]
-        assert crc == zlib.crc32(tag + data) & 0xFFFFFFFF, "CRC falsch fuer %s" % tag
+        assert crc == zlib.crc32(tag + data) & 0xFFFFFFFF, "CRC wrong for %s" % tag
         chunks.setdefault(tag, b"")
         chunks[tag] += data
         pos += 12 + length
@@ -74,38 +74,38 @@ def parse_png(blob):
 
 
 def test_png():
-    print("PNG-Encoder")
+    print("PNG encoder")
     w, h = 8, 4
     raw = synthetic_screen(w, h)
     blob = png.encode_rgb565_png(raw, w, h)
     chunks = parse_png(blob)
     ihdr = chunks[b"IHDR"]
     width, height, depth, ctype = struct.unpack(">IIBB", ihdr[:10])
-    check("IHDR Groesse", (width, height) == (w, h), "%s" % ((width, height),))
+    check("IHDR size", (width, height) == (w, h), "%s" % ((width, height),))
     check("IHDR 8bit RGB", (depth, ctype) == (8, 2), "%d/%d" % (depth, ctype))
     scan = zlib.decompress(chunks[b"IDAT"])
     stride = 1 + w * 3
-    check("Scanline-Laenge", len(scan) == stride * h, "%d != %d" % (len(scan), stride * h))
+    check("scanline length", len(scan) == stride * h, "%d != %d" % (len(scan), stride * h))
     px = []
     for y in range(h):
         row = scan[y * stride:(y + 1) * stride]
-        check("Filtertyp Zeile %d" % y, row[0] == 0)
+        check("filter type row %d" % y, row[0] == 0)
         px.append(row[1:])
     first = px[0][:3]
-    check("Pixel(0,0) rot", tuple(first) == (255, 0, 0), "%s" % (tuple(first),))
+    check("pixel(0,0) red", tuple(first) == (255, 0, 0), "%s" % (tuple(first),))
     second = px[0][3:6]
-    check("Pixel(1,0) blau", tuple(second) == (0, 0, 255), "%s" % (tuple(second),))
-    # Zeilenreihenfolge: Zeile 1 beginnt mit blau (Muster x+y ungerade)
-    check("Zeilenreihenfolge", tuple(px[1][:3]) == (0, 0, 255), "%s" % (tuple(px[1][:3]),))
-    # Byte-Swap-Variante
+    check("pixel(1,0) blue", tuple(second) == (0, 0, 255), "%s" % (tuple(second),))
+    # Row order: row 1 starts with blue (pattern x+y odd)
+    check("row order", tuple(px[1][:3]) == (0, 0, 255), "%s" % (tuple(px[1][:3]),))
+    # byte-swap variant
     raw2 = synthetic_screen(w, h, byte_swap=False)
     blob2 = png.encode_rgb565_png(raw2, w, h, byte_swap=False)
     scan2 = zlib.decompress(parse_png(blob2)[b"IDAT"])
-    check("byte_swap=False gleichwertig", scan == scan2)
+    check("byte_swap=False equivalent", scan == scan2)
 
 
 def test_protocol():
-    print("MCP/JSON-RPC-Kern")
+    print("MCP/JSON-RPC core")
     from mcp_protocol import Tool
     calls = []
 
@@ -122,65 +122,65 @@ def test_protocol():
                                        "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}})
     check("initialize echo version", r["result"]["protocolVersion"] == "2025-03-26")
     check("initialize serverInfo", r["result"]["serverInfo"]["name"] == "esp32-mcp")
-    check("initialize capabilities hat tools", "tools" in r["result"]["capabilities"])
+    check("initialize capabilities has tools", "tools" in r["result"]["capabilities"])
 
     r = mcp.handle_message({"jsonrpc": "2.0", "id": 2, "method": "initialize",
                             "params": {"protocolVersion": "1999-01-01"}})
-    check("unbekannte Version -> Default", r["result"]["protocolVersion"] == protocol.DEFAULT_PROTOCOL)
+    check("unknown version -> default", r["result"]["protocolVersion"] == protocol.DEFAULT_PROTOCOL)
 
-    check("Notification ohne Antwort", mcp.handle_message(
+    check("notification without a reply", mcp.handle_message(
         {"jsonrpc": "2.0", "method": "notifications/initialized"}) is None)
-    check("initialized gesetzt", mcp.initialized)
+    check("initialized set", mcp.initialized)
 
     r = mcp.handle_message({"jsonrpc": "2.0", "id": 3, "method": "tools/list"})
     names = [t["name"] for t in r["result"]["tools"]]
-    check("tools/list enthaelt echo", names == ["echo"], "%s" % names)
-    check("tools/list hat inputSchema", "inputSchema" in r["result"]["tools"][0])
+    check("tools/list contains echo", names == ["echo"], "%s" % names)
+    check("tools/list has inputSchema", "inputSchema" in r["result"]["tools"][0])
 
     r = mcp.handle_message({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
-                            "params": {"name": "echo", "arguments": {"value": "hallo"}}})
-    check("tools/call Ergebnis", r["result"]["content"][0]["text"] == "echo:hallo")
-    check("Handler wurde aufgerufen", calls == ["hallo"])
+                            "params": {"name": "echo", "arguments": {"value": "hello"}}})
+    check("tools/call result", r["result"]["content"][0]["text"] == "echo:hello")
+    check("handler was called", calls == ["hello"])
 
     r = mcp.handle_message({"jsonrpc": "2.0", "id": 5, "method": "tools/call",
-                            "params": {"name": "gibtsnicht", "arguments": {}}})
-    check("unbekanntes Tool -> Fehler", r["error"]["code"] == protocol.INVALID_PARAMS)
+                            "params": {"name": "doesnotexist", "arguments": {}}})
+    check("unknown tool -> error", r["error"]["code"] == protocol.INVALID_PARAMS)
 
     r = mcp.handle_message({"jsonrpc": "2.0", "id": 6, "method": "tools/call",
                             "params": {"name": "echo", "arguments": {}}})
-    check("fehlendes Pflichtargument -> Fehler", r["error"]["code"] == protocol.INVALID_PARAMS)
+    check("missing required argument -> error", r["error"]["code"] == protocol.INVALID_PARAMS)
 
-    r = mcp.handle_message({"jsonrpc": "2.0", "id": 7, "method": "gibtsnicht"})
-    check("unbekannte Methode -> -32601", r["error"]["code"] == protocol.METHOD_NOT_FOUND)
+    r = mcp.handle_message({"jsonrpc": "2.0", "id": 7, "method": "doesnotexist"})
+    check("unknown method -> -32601", r["error"]["code"] == protocol.METHOD_NOT_FOUND)
 
     r = mcp.handle_message({"jsonrpc": "2.0", "id": 8, "method": "ping"})
     check("ping", r["result"] == {})
 
     r = mcp.handle_message({"id": 9})
-    check("ohne method -> invalid", r["error"]["code"] == protocol.INVALID_REQUEST)
+    check("without method -> invalid", r["error"]["code"] == protocol.INVALID_REQUEST)
 
 
 def test_http_layer():
-    print("HTTP-Layer")
+    print("HTTP layer")
     check("parse_query", httpd.parse_query("a=1&b=x%20y&c") == {"a": "1", "b": "x y", "c": ""})
 
     import io
     raw = b"POST /mcp?a=1 HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\n\r\nhello"
     req = httpd.read_request(io.BytesIO(raw))
-    check("Request-Zeile", (req.method, req.path) == ("POST", "/mcp"))
-    check("Query", req.query == {"a": "1"})
-    check("Body", req.body == b"hello")
+    check("request line", (req.method, req.path) == ("POST", "/mcp"))
+    check("query", req.query == {"a": "1"})
+    check("body", req.body == b"hello")
 
     req = httpd.read_request(io.BytesIO(b"GET / HTTP/1.1\r\n\r\n"))
-    check("GET ohne Body", req.method == "GET" and req.body == b"")
-    check("leere Verbindung -> None", httpd.read_request(io.BytesIO(b"")) is None)
+    check("GET without body", req.method == "GET" and req.body == b"")
+    check("empty connection -> None", httpd.read_request(io.BytesIO(b"")) is None)
 
     buf = io.BytesIO()
     httpd.write_response(buf, httpd.json_response({"ok": True}))
     out = buf.getvalue()
-    check("Statuszeile", out.startswith(b"HTTP/1.1 200 OK\r\n"))
-    check("Content-Length korrekt", b"Content-Length: 12\r\n" in out, out[:120])
-    check("JSON-Body", out.endswith(b'{"ok": true}'))
+    check("status line", out.startswith(b"HTTP/1.1 200 OK\r\n"))
+    check("Content-Length correct", b"Content-Length: 12\r\n" in out, out[:120])
+    check("JSON body", out.endswith(b'{"ok": true}'))
 
 
 def http_request(port, method, path, body=None, headers=None, timeout=5):
@@ -211,10 +211,10 @@ def http_request(port, method, path, body=None, headers=None, timeout=5):
 
 
 def test_end_to_end():
-    print("Ende-zu-Ende ueber HTTP (echter Socket)")
+    print("End to end over HTTP (real socket)")
     port = 8098
-    # Die Weboberflaeche liegt als Dateien im Repo -- im Test zeigt ROOT dorthin,
-    # auf dem Geraet auf das Verzeichnis /web.
+    # The web UI lives as files in the repo -- in the test ROOT points there,
+    # on the device to the directory /web.
     webui.ROOT = os.path.join(os.path.dirname(HERE), "firmware")
     webui.WEB_DIR = "webfiles"
     screen.attach(synthetic_screen(64, 32), 64, 32, byte_swap=True, label="test")
@@ -226,11 +226,11 @@ def test_end_to_end():
     try:
         status, headers, body = http_request(port, "GET", "/")
         check("GET / -> 200", status == 200, "%s" % status)
-        check("GET / liefert die Weboberflaeche", b"<!DOCTYPE html>" in body)
+        check("GET / serves the web UI", b"<!DOCTYPE html>" in body)
 
         status, headers, body = http_request(port, "GET", "/status")
         check("GET /status -> 200", status == 200, "%s" % status)
-        check("Status nennt Tools", b"screenshot" in body)
+        check("status names tools", b"screenshot" in body)
 
         status, headers, body = http_request(port, "GET", "/info")
         info = json.loads(body)
@@ -245,16 +245,16 @@ def test_end_to_end():
         reply = json.loads(body)
         check("MCP initialize via HTTP", status == 200 and reply["result"]["serverInfo"]["name"] == "esp32-debug",
               "%s %s" % (status, body[:120]))
-        check("Mcp-Session-Id gesetzt", headers.get("mcp-session-id") == "esp32-debug")
+        check("Mcp-Session-Id set", headers.get("mcp-session-id") == "esp32-debug")
 
         # MCP: tools/list
         status, _, body = http_request(port, "POST", "/mcp",
                                        json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
                                        {"Accept": "application/json"})
         names = [t["name"] for t in json.loads(body)["result"]["tools"]]
-        check("MCP tools/list enthaelt screenshot", "screenshot" in names, "%s" % names)
+        check("MCP tools/list contains screenshot", "screenshot" in names, "%s" % names)
 
-        # MCP: tools/call screenshot -> echtes PNG in base64
+        # MCP: tools/call screenshot -> real PNG in base64
         status, _, body = http_request(
             port, "POST", "/mcp",
             json.dumps({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
@@ -266,34 +266,34 @@ def test_end_to_end():
         blob = base64.b64decode(image["data"])
         chunks = parse_png(blob)
         width, height = struct.unpack(">II", chunks[b"IHDR"][:8])
-        check("Screenshot-Tool liefert PNG 32x16 (scale=2)", (width, height) == (32, 16),
+        check("screenshot tool returns PNG 32x16 (scale=2)", (width, height) == (32, 16),
               "%s" % ((width, height),))
-        check("Screenshot-Begleittext", any("scale=2" in c.get("text", "") for c in content))
+        check("screenshot accompanying text", any("scale=2" in c.get("text", "") for c in content))
 
-        # Klartext-Endpunkt
+        # plain-text endpoint
         status, headers, body = http_request(port, "GET", "/screen.png")
         check("GET /screen.png -> PNG", status == 200 and headers["content-type"] == "image/png")
-        check("PNG-Gueltig", parse_png(body)[b"IHDR"][:8] == struct.pack(">II", 64, 32))
+        check("PNG valid", parse_png(body)[b"IHDR"][:8] == struct.pack(">II", 64, 32))
 
         # exec + logs
-        status, _, body = http_request(port, "POST", "/exec", "print('hallo aus exec')")
-        check("POST /exec", status == 200 and b"hallo aus exec" in body, body[:200])
+        status, _, body = http_request(port, "POST", "/exec", "print('hello from exec')")
+        check("POST /exec", status == 200 and b"hello from exec" in body, body[:200])
 
-        # Notification -> 202 ohne Body
+        # notification -> 202 without body
         status, _, body = http_request(port, "POST", "/mcp",
                                        json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}),
                                        {"Accept": "application/json"})
-        check("Notification -> 202", status == 202 and body == b"", "%s %r" % (status, body[:40]))
+        check("notification -> 202", status == 202 and body == b"", "%s %r" % (status, body[:40]))
 
-        # SSE-Variante
+        # SSE variant
         status, headers, body = http_request(port, "POST", "/mcp",
                                              json.dumps({"jsonrpc": "2.0", "id": 9, "method": "ping"}),
                                              {"Accept": "text/event-stream"})
-        check("SSE-Antwort", status == 200 and body.startswith(b"event: message\ndata: "), body[:60])
+        check("SSE response", status == 200 and body.startswith(b"event: message\ndata: "), body[:60])
 
-        # unbekannte Route
-        status, _, _ = http_request(port, "GET", "/nichts")
-        check("unbekannte Route -> 404", status == 404)
+        # unknown route
+        status, _, _ = http_request(port, "GET", "/nothing")
+        check("unknown route -> 404", status == 404)
     finally:
         server.running = False
         screen.detach()
@@ -306,9 +306,9 @@ def main():
     test_end_to_end()
     print()
     if FAILURES:
-        print("%d von %d Checks FEHLGESCHLAGEN: %s" % (len(FAILURES), CHECKS[0], ", ".join(FAILURES)))
+        print("%d of %d checks FAILED: %s" % (len(FAILURES), CHECKS[0], ", ".join(FAILURES)))
         return 1
-    print("alle %d Checks ok" % CHECKS[0])
+    print("all %d checks ok" % CHECKS[0])
     return 0
 
 

@@ -1,6 +1,6 @@
-# Minimaler HTTP/1.1-Server in reinem MicroPython-Socket-Code.
-# Absichtlich klein und hostseitig testbar: Request-Parsing ist eine freie Funktion,
-# der Server nimmt eine Routing-Tabelle (METHOD + Pfad) -> Handler(Request) -> Response.
+# Minimal HTTP/1.1 server in pure MicroPython socket code.
+# Intentionally small and testable on a host: request parsing is a free function,
+# the server takes a routing table (METHOD + path) -> handler(Request) -> Response.
 
 try:
     import usocket as socket
@@ -47,9 +47,9 @@ class Response:
             body = body.encode()
         self.body = body
         self.headers = headers or {}
-        # datei: Pfad, dessen Inhalt gestueckt gesendet wird. Auf dem Geraet wichtig --
-        # 174 KB am Stueck in den Speicher zu holen kostet unnoetig Platz und kann
-        # fehlschlagen, waehrend die Datei problemlos haeppchenweise rausgeht.
+        # datei: path whose content is sent in chunks. Important on the device --
+        # pulling 174 KB into memory in one go wastes space unnecessarily and can
+        # fail, while the file goes out fine piece by piece.
         self.datei = datei
 
     def __repr__(self):  # pragma: no cover
@@ -108,7 +108,7 @@ class BadRequest(Exception):
 
 
 def read_request(stream, max_body=262144):
-    """Liest eine HTTP-Anfrage. Rueckgabe: Request oder None (Verbindung leer)."""
+    """Reads an HTTP request. Returns: Request or None (empty connection)."""
     line = stream.readline()
     if not line:
         return None
@@ -116,7 +116,7 @@ def read_request(stream, max_body=262144):
         line = line.decode()
     parts = line.strip().split()
     if len(parts) < 2:
-        raise BadRequest("ungueltige Request-Zeile: %r" % line)
+        raise BadRequest("invalid request line: %r" % line)
     method, target = parts[0], parts[1]
     path, _, qs = target.partition("?")
     headers = {}
@@ -136,7 +136,7 @@ def read_request(stream, max_body=262144):
     if clen:
         clen = int(clen)
         if clen > max_body:
-            raise BadRequest("body zu gross")
+            raise BadRequest("body too large")
         body = stream.read(clen)
     return Request(method.upper(), path, parse_query(qs), headers, body)
 
@@ -146,14 +146,14 @@ def write_response(stream, resp):
     head = ["HTTP/1.1 %d %s" % (resp.status, reason)]
     headers = dict(resp.headers)
     headers.setdefault("Content-Type", "application/octet-stream")
-    groesse = len(resp.body)
+    size = len(resp.body)
     if resp.datei is not None:
         try:
             import os
-            groesse = os.stat(resp.datei)[6]
+            size = os.stat(resp.datei)[6]
         except OSError:
-            groesse = 0
-    headers["Content-Length"] = str(groesse)
+            size = 0
+    headers["Content-Length"] = str(size)
     headers.setdefault("Connection", "close")
     headers.setdefault("Access-Control-Allow-Origin", "*")
     for k, v in headers.items():
@@ -162,20 +162,20 @@ def write_response(stream, resp):
     if resp.datei is not None:
         with open(resp.datei, "rb") as fh:
             while True:
-                stueck = fh.read(2048)
-                if not stueck:
+                piece = fh.read(2048)
+                if not piece:
                     break
-                stream.write(stueck)
+                stream.write(piece)
     elif resp.body:
         stream.write(resp.body)
-    # MicroPython-Sockets haben kein flush() -- CPython-Dateiobjekte schon.
+    # MicroPython sockets have no flush() -- CPython file objects do.
     flush = getattr(stream, "flush", None)
     if flush is not None:
         flush()
 
 
 def write_sse(stream, payload, event="message"):
-    """Antwort im Streamable-HTTP-SSE-Format (fuer MCP-Clients, die SSE verlangen)."""
+    """Response in streamable-HTTP SSE format (for MCP clients that require SSE)."""
     body = ("event: %s\ndata: %s\n\n" % (event, payload)).encode()
     head = ("HTTP/1.1 200 OK\r\n"
             "Content-Type: text/event-stream\r\n"
@@ -188,22 +188,22 @@ def write_sse(stream, payload, event="message"):
 
 
 def stream_for(conn):
-    """CPython-Sockets haben kein readline() -- dort eine Datei-Sicht erzeugen.
-    MicroPython-Sockets koennen readline/read/write direkt."""
+    """CPython sockets have no readline() -- create a file view there.
+    MicroPython sockets can readline/read/write directly."""
     if hasattr(conn, "readline"):
         return conn
     return conn.makefile("rwb")
 
 
-MAX_WORKERS = 4        # gleichzeitige Verbindungen; die Weboberflaeche holt mehrere
-                       # Endpunkte parallel (Status, Dateien, Konfiguration, Bild),
-                       # deshalb nicht knapper als noetig begrenzen
-WORKER_STACK = 16384   # Bytes Stack pro Verbindung (JSON + PNG brauchen etwas Luft)
+MAX_WORKERS = 4        # concurrent connections; the web UI fetches several
+                       # endpoints in parallel (status, files, configuration, image),
+                       # so do not limit it more tightly than necessary
+WORKER_STACK = 16384   # bytes of stack per connection (JSON + PNG need some room)
 
 
 def start_worker(fn, args):
-    """Startet einen Thread. Achtung: der dritte Parameter von start_new_thread ist in
-    MicroPython kwargs (kein Stackwert!) -- die Stackgroesse setzt man global ueber
+    """Starts a thread. Note: the third parameter of start_new_thread is kwargs in
+    MicroPython (not a stack value!) -- the stack size is set globally via
     _thread.stack_size()."""
     if _thread is None:
         return False
@@ -221,7 +221,7 @@ def start_worker(fn, args):
 
 
 class HttpServer:
-    """Blockierender Server. `start_in_thread()` fuer den Betrieb neben LVGL."""
+    """Blocking server. Use `start_in_thread()` for operation alongside LVGL."""
 
     def __init__(self, routes, port=80, host="0.0.0.0", on_error=None):
         self.routes = routes
@@ -241,9 +241,9 @@ class HttpServer:
         return s
 
     def serve_forever(self):
-        """Nimmt Verbindungen an. Jede Verbindung bekommt einen eigenen Thread --
-        sonst blockiert ein einziger haengender Handler (z.B. eine wartende
-        LVGL-Anforderung) die gesamte Annahmeschleife."""
+        """Accepts connections. Every connection gets its own thread --
+        otherwise a single stuck handler (e.g. a waiting LVGL request) blocks the
+        entire accept loop."""
         s = self.sock or self._open()
         self.running = True
         while self.running:
@@ -258,7 +258,7 @@ class HttpServer:
                 self._workers -= 1
             try:
                 self._handle(conn, addr)
-            except Exception as exc:  # noqa: BLE001 - die Annahmeschleife darf nie sterben
+            except Exception as exc:  # noqa: BLE001 - the accept loop must never die
                 if self.on_error:
                     self.on_error(exc)
             finally:
@@ -282,26 +282,26 @@ class HttpServer:
 
     def start_in_thread(self):
         if _thread is None:
-            raise RuntimeError("kein _thread-Modul vorhanden")
+            raise RuntimeError("no _thread module available")
         self._open()
         start_worker(self.serve_forever, ())
 
     def _find_handler(self, method, path):
-        """Exakter Treffer, sonst Praefix-Route (Schluessel endet auf '*').
+        """Exact match, otherwise a prefix route (key ends with '*').
 
-        Praefix-Routen werden fuer Dateibaeume gebraucht (z.B. den mitgelieferten
-        Codeeditor), damit nicht jede einzelne Datei eingetragen werden muss.
+        Prefix routes are needed for file trees (e.g. the bundled code editor),
+        so that not every single file has to be registered.
         """
         handler = self.routes.get(method + " " + path)
         if handler is not None:
             return handler
-        for key, kandidat in self.routes.items():
+        for key, candidate in self.routes.items():
             if not key.endswith("*"):
                 continue
-            k_methode, _, k_praefix = key.partition(" ")
-            k_praefix = k_praefix[:-1]          # das "*" gehoert nicht zum Vergleich
-            if k_methode == method and path.startswith(k_praefix):
-                return kandidat
+            k_method, _, k_prefix = key.partition(" ")
+            k_prefix = k_prefix[:-1]          # the "*" is not part of the comparison
+            if k_method == method and path.startswith(k_prefix):
+                return candidate
         return None
 
     def _handle(self, conn, addr):
@@ -316,11 +316,11 @@ class HttpServer:
         req.client = addr
         handler = self._find_handler(req.method, req.path)
         if handler is None:
-            write_response(stream, text(404, "kein Handler fuer %s %s" % (req.method, req.path)))
+            write_response(stream, text(404, "no handler for %s %s" % (req.method, req.path)))
             return
         try:
             resp = handler(req)
-        except Exception as exc:  # noqa: BLE001 - Fehler im Handler -> 500 statt stummer Trennung
+        except Exception as exc:  # noqa: BLE001 - error in handler -> 500 instead of a silent disconnect
             if self.on_error:
                 self.on_error(exc)
             write_response(stream, text(500, "%s: %s" % (type(exc).__name__, exc)))

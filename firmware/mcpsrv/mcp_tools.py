@@ -1,6 +1,6 @@
-# Tool-Definitionen des Debug-MCP-Servers.
-# Alle Hardware-Zugriffe passieren in try/except: fehlt ein Modul (z.B. beim Host-Test),
-# liefert das Tool eine lesbare Fehlermeldung statt eines Absturzes.
+# Tool definitions of the debug MCP server.
+# All hardware accesses happen in try/except: if a module is missing (e.g. in a host
+# test), the tool returns a readable error message instead of crashing.
 
 import sys
 import time
@@ -16,25 +16,25 @@ def _json_ok(**kw):
 
 
 def tool_screenshot(scale=1, format="png"):
-    """Bildschirm als Bild. format: png|raw, scale: 1,2,4 (Sampling)."""
+    """Screen as an image. format: png|raw, scale: 1,2,4 (sampling)."""
     data, w, h, swap = mcp_screen.capture(scale=scale)
     if format == "raw":
         return {"content": [
-            {"type": "text", "text": "raw RGB565 %dx%d byte_swap=%s, %d Bytes "
-                                     "(Endpunkt /screen.raw?scale=%s)" % (w, h, swap, len(data), scale)}]}
+            {"type": "text", "text": "raw RGB565 %dx%d byte_swap=%s, %d bytes "
+                                     "(endpoint /screen.raw?scale=%s)" % (w, h, swap, len(data), scale)}]}
     blob = mcp_png.encode_rgb565_png(data, w, h, byte_swap=swap)
     return {"content": [
         {"type": "image", "data": b64(blob), "mimeType": "image/png"},
-        {"type": "text", "text": "screenshot %dx%d (scale=%s), PNG %d Bytes, Puffer: %s"
+        {"type": "text", "text": "screenshot %dx%d (scale=%s), PNG %d bytes, buffer: %s"
                                  % (w, h, scale, len(blob), mcp_screen.describe())}]}
 
 
 def tool_exec(code):
-    """Python-Code auf dem Geraet ausfuehren und die Ausgabe zurueckgeben.
+    """Run Python code on the device and return the output.
 
-    `print` wird im Namespace des Codes ersetzt: MicroPython schreibt mit `print`
-    direkt in den C-stdout (nicht ueber sys.stdout), ein Mitschnitt dort wuerde also
-    nichts sehen. Ausgabe von `print(...)` wird hier eingesammelt und zurueckgegeben.
+    `print` is replaced in the namespace of the code: MicroPython writes with `print`
+    directly to the C stdout (not via sys.stdout), so a capture there would see
+    nothing. Output of `print(...)` is collected here and returned.
     """
     lines = []
 
@@ -56,8 +56,8 @@ def tool_exec(code):
 
     out = "".join(lines)
     if err:
-        out += ("\n" if out and not out.endswith("\n") else "") + "FEHLER: " + err
-    out += "\n[exec %s in %d ms]" % ("ok" if ok else "fehlgeschlagen", took)
+        out += ("\n" if out and not out.endswith("\n") else "") + "ERROR: " + err
+    out += "\n[exec %s in %d ms]" % ("ok" if ok else "failed", took)
     return out
 
 
@@ -68,7 +68,7 @@ def tool_files(action="list", path="/", data=None, encoding="utf-8"):
         try:
             names = os.listdir(path)
         except OSError as exc:
-            return "listdir(%s) fehlgeschlagen: %s" % (path, exc)
+            return "listdir(%s) failed: %s" % (path, exc)
         rows = []
         for name in sorted(names):
             full = path.rstrip("/") + "/" + name
@@ -77,41 +77,41 @@ def tool_files(action="list", path="/", data=None, encoding="utf-8"):
                 rows.append("%9d  %s%s" % (st[6], name, "/" if st[0] & 0x4000 else ""))
             except OSError:
                 rows.append("        ?  %s" % name)
-        return "\n".join(rows) or "(leer)"
+        return "\n".join(rows) or "(empty)"
     if action == "read":
         with open(path, "r" if encoding else "rb") as fh:
             return fh.read()
     if action == "write":
         if data is None:
-            return "data fehlt"
+            return "data missing"
         with open(path, "w" if encoding else "wb") as fh:
             fh.write(data)
-        return "geschrieben: %s (%d Zeichen)" % (path, len(data))
+        return "written: %s (%d characters)" % (path, len(data))
     if action == "remove":
         try:
             os.remove(path)
-            return "geloescht: %s" % path
+            return "deleted: %s" % path
         except OSError as exc:
-            return "remove fehlgeschlagen: %s" % exc
+            return "remove failed: %s" % exc
     if action == "mkdir":
         try:
             os.mkdir(path)
-            return "erstellt: %s" % path
+            return "created: %s" % path
         except OSError as exc:
-            return "mkdir fehlgeschlagen: %s" % exc
+            return "mkdir failed: %s" % exc
     if action == "stat":
         try:
             st = os.stat(path)
             return "mode=%o size=%d" % (st[0], st[6])
         except OSError as exc:
-            return "stat fehlgeschlagen: %s" % exc
+            return "stat failed: %s" % exc
     if action == "df":
         try:
             st = os.statvfs("/")
-            return "frei=%d Bytes von %d" % (st[0] * st[3], st[0] * st[2])
+            return "free=%d bytes of %d" % (st[0] * st[3], st[0] * st[2])
         except OSError as exc:
-            return "statvfs fehlgeschlagen: %s" % exc
-    return "unbekannte Aktion: %s" % action
+            return "statvfs failed: %s" % exc
+    return "unknown action: %s" % action
 
 
 def tool_device_info():
@@ -126,7 +126,7 @@ def tool_device_info():
         except Exception:
             pass
     except ImportError:
-        info["machine"] = "nicht verfuegbar (Host-Test?)"
+        info["machine"] = "not available (host test?)"
     try:
         import gc
         if hasattr(gc, "mem_free"):
@@ -144,14 +144,14 @@ def tool_device_info():
         sta = network.WLAN(network.STA_IF)
         info["wifi"] = {"connected": sta.isconnected(), "ifconfig": sta.ifconfig()}
     except Exception:
-        info["wifi"] = "nicht verfuegbar"
+        info["wifi"] = "not available"
     info["screen"] = mcp_screen.describe()
     info["uptime_s"] = time.time()
     return _json_ok(**info)
 
 
 def tool_logs(clear=False):
-    return mcp_logbuf.logs(clear=clear) or "(kein Log)"
+    return mcp_logbuf.logs(clear=clear) or "(no log)"
 
 
 def tool_lvgl_tree(max_nodes=60):
@@ -163,9 +163,9 @@ def tool_i2c_scan(sda=21, scl=20, freq=100000):
         import machine
         bus = machine.I2C(0, sda=machine.Pin(sda), scl=machine.Pin(scl), freq=freq)
         found = ["0x%02x" % a for a in bus.scan()]
-        return "I2C sda=%d scl=%d: %s" % (sda, scl, ", ".join(found) or "(nichts)")
+        return "I2C sda=%d scl=%d: %s" % (sda, scl, ", ".join(found) or "(nothing)")
     except Exception as exc:  # noqa: BLE001
-        return "I2C-Scan fehlgeschlagen: %s" % exc
+        return "I2C scan failed: %s" % exc
 
 
 def tool_reset(delay_ms=300, hard=False):
@@ -179,16 +179,16 @@ def tool_reset(delay_ms=300, hard=False):
     try:
         import _thread
         _thread.start_new_thread(_do, ())
-        return "Reset in %d ms ausgeloest" % delay_ms
+        return "reset triggered in %d ms" % delay_ms
     except ImportError:
-        return "kein _thread: Reset nicht ausgeloest"
+        return "no _thread: reset not triggered"
 
 
 def tool_wifi(action="status", ssid=None, password=None):
     try:
         import network
     except ImportError:
-        return "network nicht verfuegbar"
+        return "network not available"
     sta = network.WLAN(network.STA_IF)
     action = (action or "status").lower()
     if action == "status":
@@ -199,38 +199,38 @@ def tool_wifi(action="status", ssid=None, password=None):
             n[0].decode() if isinstance(n[0], bytes) else n[0], n[2], n[3], n[4]) for n in nets)
     if action == "connect":
         if not ssid:
-            return "ssid fehlt"
+            return "ssid missing"
         sta.active(True)
         sta.connect(ssid, password)
         for _ in range(40):
             if sta.isconnected():
-                return "verbunden: %s" % (sta.ifconfig(),)
+                return "connected: %s" % (sta.ifconfig(),)
             time.sleep(0.25)
-        return "Verbindung zu %s nicht zustande gekommen" % ssid
+        return "connection to %s did not come up" % ssid
     if action == "disconnect":
         sta.disconnect()
-        return "getrennt"
-    return "unbekannte Aktion: %s" % action
+        return "disconnected"
+    return "unknown action: %s" % action
 
 
 def build_tools():
     return [
         Tool("screenshot",
-             "Screenshot des LVGL-Displays als PNG-Bild (oder als Rohpuffer). "
-             "scale=2 halbiert die Aufloesung, scale=4 viertelt sie.",
+             "Screenshot of the LVGL display as a PNG image (or as a raw buffer). "
+             "scale=2 halves the resolution, scale=4 quarters it.",
              {"type": "object", "properties": {
                  "scale": {"type": "integer", "minimum": 1, "maximum": 8},
                  "format": {"type": "string", "enum": ["png", "raw"]}},
               "additionalProperties": False},
              lambda scale=1, format="png": tool_screenshot(scale, format)),
         Tool("exec_python",
-             "Fuehrt Python-Code auf dem Geraet aus und liefert stdout (inkl. Log-Auszug). "
-             "Laeuft im Server-Thread -- LVGL-Aufrufe koennen unsicher sein.",
+             "Runs Python code on the device and returns stdout (incl. a log excerpt). "
+             "Runs in the server thread -- LVGL calls may be unsafe.",
              {"type": "object", "properties": {"code": {"type": "string"}},
               "required": ["code"], "additionalProperties": False},
              lambda code: tool_exec(code)),
         Tool("files",
-             "Dateien auf dem Geraet: list, read, write, remove, mkdir, stat, df.",
+             "Files on the device: list, read, write, remove, mkdir, stat, df.",
              {"type": "object", "properties": {
                  "action": {"type": "string",
                             "enum": ["list", "read", "write", "remove", "mkdir", "stat", "df"]},
@@ -241,18 +241,18 @@ def build_tools():
              lambda action="list", path="/", data=None, encoding="utf-8":
                  tool_files(action, path, data, encoding)),
         Tool("device_info",
-             "Chip, Speicher, WLAN-Status, Laufzeit und Bildquelle.",
+             "Chip, memory, WLAN status, uptime and image source.",
              {"type": "object", "properties": {}, "additionalProperties": False},
              lambda: tool_device_info()),
-        Tool("logs", "Letzte Konsolenausgaben des Geraets.", 
+        Tool("logs", "Last console output of the device.",
              {"type": "object", "properties": {"clear": {"type": "boolean"}},
               "additionalProperties": False},
              lambda clear=False: tool_logs(clear)),
-        Tool("lvgl_tree", "Widget-Baum der aktiven LVGL-Screen (Klassen, Position, Groesse, Text).",
+        Tool("lvgl_tree", "Widget tree of the active LVGL screen (classes, position, size, text).",
              {"type": "object", "properties": {"max_nodes": {"type": "integer"}},
               "additionalProperties": False},
              lambda max_nodes=60: tool_lvgl_tree(max_nodes)),
-        Tool("i2c_scan", "I2C-Bus scannen (Board-Bring-up, Touch-Controller finden).",
+        Tool("i2c_scan", "Scan the I2C bus (board bring-up, find the touch controller).",
              {"type": "object", "properties": {
                  "sda": {"type": "integer"}, "scl": {"type": "integer"},
                  "freq": {"type": "integer"}},
@@ -264,7 +264,7 @@ def build_tools():
                  "ssid": {"type": "string"}, "password": {"type": "string"}},
               "additionalProperties": False},
              lambda action="status", ssid=None, password=None: tool_wifi(action, ssid, password)),
-        Tool("reset", "Geraet neu starten (verzoegert, damit die Antwort noch rausgeht).",
+        Tool("reset", "Reboot the device (delayed so the reply still gets out).",
              {"type": "object", "properties": {"delay_ms": {"type": "integer"}},
               "additionalProperties": False},
              lambda delay_ms=300: tool_reset(delay_ms)),
@@ -272,7 +272,7 @@ def build_tools():
 
 
 def build_routes(mcp_handler):
-    """Zusaetzliche Klartext-Endpunkte -- schneller als MCP fuer die Iteration per curl."""
+    """Additional plain-text endpoints -- faster than MCP for iteration with curl."""
     from mcp_httpd import text, json_response, Response
 
     def screenshot_route(req):
@@ -286,9 +286,9 @@ def build_routes(mcp_handler):
         return Response(200, blob, {"Content-Type": "image/png", "Cache-Control": "no-store"})
 
     def screenshot_raw_route(req):
-        """Rohpuffer ohne PNG-Kodierung. Die Kodierung in reinem Python kostet auf
-        diesem Board Sekunden bis Minuten -- fuer die Weboberflaeche wird der Puffer
-        deshalb roh uebertragen und im Browser in ein Bild umgerechnet."""
+        """Raw buffer without PNG encoding. Encoding in pure Python costs seconds to
+        minutes on this board -- for the web UI the buffer is therefore transferred
+        raw and converted into an image in the browser."""
         scale = int(req.arg("scale", "2"))
         data, w, h, swap = mcp_screen.capture(scale=scale)
         return Response(200, bytes(data), {"Content-Type": "application/octet-stream",
@@ -302,7 +302,7 @@ def build_routes(mcp_handler):
     def exec_route(req):
         code = req.body.decode() if req.body else req.arg("code", "")
         if not code:
-            return text(400, "body oder ?code= fehlt")
+            return text(400, "body or ?code= missing")
         return json_response({"result": tool_exec(code)})
 
     def info_route(req):

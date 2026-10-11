@@ -1,12 +1,12 @@
-# Minimaler PNG-Encoder (RGB565 -> PNG, ohne Fremdbibliotheken).
-# Laueft in MicroPython UND CPython: keine Compiler-/Bibliotheksabhaengigkeit.
-# Kompression: echte Deflate-Kompression nur wenn das `deflate`-Modul vorhanden ist,
-# sonst gueltige "stored"-Deflate-Bloecke (groesser, aber korrekt und schnell).
+# Minimal PNG encoder (RGB565 -> PNG, without third-party libraries).
+# Runs in MicroPython AND CPython: no compiler/library dependency.
+# Compression: real deflate compression only if the `deflate` module is present,
+# otherwise valid "stored" deflate blocks (larger, but correct and fast).
 
 try:
     import binascii
     _crc32 = binascii.crc32
-except ImportError:  # pragma: no cover - Fallback fuer Ports ohne binascii
+except ImportError:  # pragma: no cover - fallback for ports without binascii
     _tbl = []
     for _i in range(256):
         _c = _i
@@ -46,7 +46,7 @@ def _adler32(data):
 
 
 def _stored_zlib(data):
-    """Zlib-Stream mit unkomprimierten Deflate-Bloecken (BTYPE=00)."""
+    """Zlib stream with uncompressed deflate blocks (BTYPE=00)."""
     out = bytearray(b"\x78\x01")
     pos = 0
     n = len(data)
@@ -65,7 +65,7 @@ def _stored_zlib(data):
 
 
 def _deflate_zlib(data):
-    """Echte Kompression, falls das deflate-Modul vorhanden ist; sonst None."""
+    """Real compression if the deflate module is present; otherwise None."""
     if deflate is None:
         return None
     buf = BytesIO()
@@ -84,7 +84,7 @@ def _chunk(tag, payload):
 
 
 def rgb565_to_rgb888(data, byte_swap=True):
-    """RGB565-Puffer -> RGB888 bytes. `byte_swap` = Little-Endian-Paare im Puffer."""
+    """RGB565 buffer -> RGB888 bytes. `byte_swap` = little-endian pairs in the buffer."""
     out = bytearray(len(data) // 2 * 3)
     o = 0
     for i in range(0, len(data) - 1, 2):
@@ -105,14 +105,14 @@ def rgb565_to_rgb888(data, byte_swap=True):
 
 
 def encode_rgb565_png(data, width, height, byte_swap=True, compress=True):
-    """RGB565-Puffer -> PNG-Bytes (24-bit RGB, Filter 0 pro Zeile)."""
+    """RGB565 buffer -> PNG bytes (24-bit RGB, filter 0 per row)."""
     stride = width * 2
     if len(data) < stride * height:
-        raise ValueError("puffer zu klein: %d < %d" % (len(data), stride * height))
+        raise ValueError("buffer too small: %d < %d" % (len(data), stride * height))
     raw = bytearray()
     rowbytes = width * 3
     for y in range(height):
-        raw.append(0)  # Filtertyp None
+        raw.append(0)  # filter type None
         raw += rgb565_to_rgb888(data[y * stride:(y + 1) * stride], byte_swap)
 
     body = _deflate_zlib(bytes(raw)) if compress else None
@@ -120,6 +120,6 @@ def encode_rgb565_png(data, width, height, byte_swap=True, compress=True):
         body = _stored_zlib(bytes(raw))
 
     ihdr = (width.to_bytes(4, "big") + height.to_bytes(4, "big") +
-            bytes((8, 2, 0, 0, 0)))  # 8 bit, RGB (kein Alpha), keine Interlace
+            bytes((8, 2, 0, 0, 0)))  # 8 bit, RGB (no alpha), no interlace
     return (b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", ihdr) +
             _chunk(b"IDAT", body) + _chunk(b"IEND", b""))

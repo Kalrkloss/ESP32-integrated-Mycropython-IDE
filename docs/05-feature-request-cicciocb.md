@@ -1,17 +1,17 @@
-# Entwurf: Feature-Request an cicciocb (USB-Audio / UAC-Host, ESP32-S3)
+# Draft: Feature request to cicciocb (USB audio / UAC host, ESP32-S3)
 
-Weg A aus [04-einhaengen-in-fremde-firmware.md](04-einhaengen-in-fremde-firmware.md):
-statt Reverse Engineering eine Anfrage an den Autor — er hat Quellcode, Task-Ebene und
-Kommando-Tabelle, und der USB-Host-Stack ist im S3-Build schon vorhanden.
+Way A from [04-einhaengen-in-fremde-firmware.md](04-einhaengen-in-fremde-firmware.md):
+instead of reverse engineering, a request to the author — he has source code, task level and
+command table, and the USB host stack is already present in the S3 build.
 
-Ziel-Plattform: <https://cicciocb.com/forum> (Anmeldung als Forum-Mitglied nötig).
-Sprache: Englisch (Forumssprache).
+Target platform: <https://cicciocb.com/forum> (registration as a forum member required).
+Language: English (forum language).
 
-## Betreff
+## Subject
 
 `Feature request: USB Audio Class (UAC) host support on ESP32-S3`
 
-## Text (zum Posten)
+## Text (to post)
 
 > Hi Francesco,
 >
@@ -52,15 +52,15 @@ Sprache: Englisch (Forumssprache).
 >
 > Thanks!
 
-## Wenn ja — was getestet werden muss
+## If yes — what must be tested
 
-- Erkennung/Enumeration der Soundkarte, Hotplug (Gerät im Betrieb entfernt).
-- 44,1 und 48 kHz, 16 Bit, mono/stereo; Verhalten bei nicht unterstütztem Format.
-- Wiedergabe aus Datei und aus Stream, Vol/Mute an der Soundkarte.
-- Koexistenz mit der bestehenden I2S-Engine (nicht gleichzeitig beide Audio-Pfade).
-- Stromversorgung des Host-Ports am jeweiligen S3-Board (5 V für den Host-Port ist bei
-  vielen Boards nicht ab Werk freigegeben).
+- Detection/enumeration of the sound card, hotplug (device removed during operation).
+- 44.1 and 48 kHz, 16 bit, mono/stereo; behavior with an unsupported format.
+- Playback from file and from stream, vol/mute at the sound card.
+- Coexistence with the existing I2S engine (not both audio paths at the same time).
+- Power supply of the host port on the respective S3 board (5 V for the host port is on
+  many boards not enabled from the factory).
 
-## Wenn nein
+## If no
 
-Dann Weg B (eigene Firmware) — siehe [02-plan.md](02-plan.md).
+Then way B (own firmware) — see [02-plan.md](02-plan.md).

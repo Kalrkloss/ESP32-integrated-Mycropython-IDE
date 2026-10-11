@@ -1,14 +1,14 @@
-# Einstiegspunkt des Debug-MCP-Servers auf dem ESP32.
-# Startet einen HTTP-Server (Thread) mit:
-#   POST /mcp            -> MCP (JSON-RPC), Tools siehe tools.build_tools()
-#   GET  /               -> Status
-#   GET  /screen.png     -> Screenshot (auch ?scale=2)
-#   GET  /log            -> letzte Konsolenausgaben
-#   POST /exec           -> Python auf dem Geraet ausfuehren
-#   GET  /info           -> Geraeteinfos
-#   POST /reset          -> Neustart
-# Die Module dieses Ordners werden flach eingebunden (sys.path enthaelt diesen Ordner
-# bzw. sie sind als Module eingefroren).
+# Entry point of the debug MCP server on the ESP32.
+# Starts an HTTP server (thread) with:
+#   POST /mcp            -> MCP (JSON-RPC), tools see tools.build_tools()
+#   GET  /               -> status
+#   GET  /screen.png     -> screenshot (also ?scale=2)
+#   GET  /log            -> last console output
+#   POST /exec           -> run Python on the device
+#   GET  /info           -> device info
+#   POST /reset          -> reboot
+# The modules of this folder are included flat (sys.path contains this folder
+# or they are frozen as modules).
 
 import json
 import time
@@ -24,18 +24,18 @@ PORT = 80
 SERVER_NAME = "esp32-debug"
 SERVER_VERSION = "0.1.0"
 INSTRUCTIONS = (
-    "Debug-Server auf einem ESP32-S3 (JC3248W535, MicroPython+LVGL). "
-    "screenshot liefert den Bildschirm, exec_python fuehrt Code aus, "
-    "logs zeigt die Konsole, reset startet das Board neu."
+    "Debug server on an ESP32-S3 (JC3248W535, MicroPython+LVGL). "
+    "screenshot returns the screen, exec_python runs code, "
+    "logs shows the console, reset reboots the board."
 )
 
 
 def build_server(port=PORT, setup_only=False):
-    """Baut MCP-Server + Router. Auch hostseitig nutzbar (ohne Hardware).
+    """Builds the MCP server + router. Also usable on a host (without hardware).
 
-    setup_only: Nur die Einrichtungsseite ausliefern (offener Zugangspunkt!).
-    Dann gibt es weder MCP-Tools noch Codeausfuehrung noch Dateizugriff -- wer im
-    offenen WLAN sitzt, soll ausschliesslich die Konfiguration aendern koennen.
+    setup_only: serve the setup page only (open access point!).
+    Then there are neither MCP tools nor code execution nor file access -- whoever
+    sits on the open WLAN should only be able to change the configuration.
     """
     mcp_logbuf.install()
     mcp = mcp_protocol.McpServer(mcp_tools.build_tools(), server_name=SERVER_NAME,
@@ -69,29 +69,29 @@ def build_server(port=PORT, setup_only=False):
         routes = mcp_webui.setup_routes()
     else:
         routes = mcp_tools.build_routes(mcp_handler)
-        # Die Weboberflaeche uebernimmt "/" (Konsole, Editor, Dateimanager,
-        # Konfiguration); der Klartext-Status liegt weiterhin unter "/status".
+        # The web UI takes over "/" (console, editor, file manager,
+        # configuration); the plain-text status stays available under "/status".
         routes.update(mcp_webui.build_routes())
-    # Fehler in Handlern in den Logring schreiben -- sonst verschwinden sie spurlos.
+    # Write errors in handlers into the log ring -- otherwise they vanish without a trace.
     return mcp, mcp_httpd.HttpServer(
         routes, port=port,
-        on_error=lambda exc: mcp_logbuf.log("HTTP-Fehler: %s: %s" % (type(exc).__name__, exc)))
+        on_error=lambda exc: mcp_logbuf.log("HTTP error: %s: %s" % (type(exc).__name__, exc)))
 
 
 def _aufsicht(server):
-    """Annahmeschleife ueberwachen.
+    """Supervise the accept loop.
 
-    Stirbt sie -- etwa an einem Speicherfehler beim Ausliefern --, lauscht nichts
-    mehr auf dem Port, waehrend die Hauptschleife unveraendert weiterlaeuft. Das
-    Board wirkt dann erreichbar (ping), ist aber tot. Deshalb hier neu starten
-    statt den Server stillschweigend zu verlieren.
+    If it dies -- for example from a memory error while serving -- nothing listens
+    on the port anymore, while the main loop keeps running unchanged. The board then
+    looks reachable (ping) but is dead. So restart here instead of silently losing
+    the server.
     """
     while True:
         try:
             server.serve_forever()
-            return                       # regulaeres Ende (running wurde auf False gesetzt)
+            return                       # regular end (running was set to False)
         except Exception as exc:  # noqa: BLE001
-            mcp_logbuf.log("mcp_serve: Annahmeschleife neu gestartet nach %s: %s"
+            mcp_logbuf.log("mcp_serve: accept loop restarted after %s: %s"
                            % (type(exc).__name__, exc))
             try:
                 if server.sock is not None:
@@ -113,7 +113,7 @@ def start(port=PORT, setup_only=False):
 
 
 def main(port=PORT):
-    """Als main.py auf dem Geraet: warten, damit der Thread weiterlaeuft."""
+    """As main.py on the device: keep waiting so the thread keeps running."""
     start(port=port)
     while True:
         time.sleep(1)

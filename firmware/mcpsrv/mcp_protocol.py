@@ -1,6 +1,6 @@
-# Minimaler MCP-Server-Kern (JSON-RPC 2.0) -- MicroPython-tauglich, hostseitig testbar.
-# Deckt ab: initialize, notifications/initialized, tools/list, tools/call, ping.
-# Bewusst ohne Fremdbibliotheken, damit derselbe Code auf dem ESP32 laeuft.
+# Minimal MCP server core (JSON-RPC 2.0) -- MicroPython-friendly, testable on a host.
+# Covers: initialize, notifications/initialized, tools/list, tools/call, ping.
+# Deliberately without third-party libraries, so that the same code runs on the ESP32.
 
 try:
     import json
@@ -18,7 +18,7 @@ INTERNAL_ERROR = -32603
 
 
 class Tool:
-    """Ein MCP-Tool: Name, Beschreibung, JSON-Schema der Argumente, Handler."""
+    """An MCP tool: name, description, JSON schema of the arguments, handler."""
 
     def __init__(self, name, description, schema=None, handler=None, title=None):
         self.name = name
@@ -38,7 +38,7 @@ class Tool:
         return d
 
     def call(self, arguments):
-        """Gibt eine MCP-content-Liste zurueck."""
+        """Returns an MCP content list."""
         args = dict(arguments or {})
         result = self.handler(**args) if self.handler else None
         return _to_content(result)
@@ -74,7 +74,7 @@ def _b64(data):
 
 
 def b64(data):
-    """Base64 als String -- auf dem Geraet ueber das eingebaute binascii."""
+    """Base64 as a string -- on the device via the built-in binascii."""
     try:
         import binascii
         return binascii.b2a_base64(bytes(data)).decode().strip()
@@ -94,15 +94,15 @@ class McpServer:
 
     # -- JSON-RPC ---------------------------------------------------------
     def handle_message(self, msg):
-        """Verarbeitet eine JSON-RPC-Nachricht. Rueckgabe: Antwort-dict oder None."""
+        """Processes a JSON-RPC message. Returns: reply dict or None."""
         if not isinstance(msg, dict):
-            return self._error(None, INVALID_REQUEST, "Nachricht ist kein Objekt")
+            return self._error(None, INVALID_REQUEST, "message is not an object")
         if isinstance(msg.get("method"), str) and "id" not in msg:
             return self._notification(msg)
         req_id = msg.get("id")
         method = msg.get("method")
         if not isinstance(method, str):
-            return self._error(req_id, INVALID_REQUEST, "method fehlt")
+            return self._error(req_id, INVALID_REQUEST, "method missing")
         params = msg.get("params") or {}
         if not isinstance(params, dict):
             params = {}
@@ -112,7 +112,7 @@ class McpServer:
             return self._error(req_id, METHOD_NOT_FOUND, str(exc))
         except InvalidParams as exc:
             return self._error(req_id, INVALID_PARAMS, str(exc))
-        except Exception as exc:  # noqa: BLE001 - alles Unerwartete wird zur JSON-RPC-Fehlermeldung
+        except Exception as exc:  # noqa: BLE001 - anything unexpected becomes a JSON-RPC error message
             return self._error(req_id, INTERNAL_ERROR, "%s: %s" % (type(exc).__name__, exc))
         return {"jsonrpc": "2.0", "id": req_id, "result": result}
 
@@ -131,21 +131,21 @@ class McpServer:
         if method == "tools/call":
             name = params.get("name")
             if not isinstance(name, str):
-                raise InvalidParams("name fehlt")
+                raise InvalidParams("name missing")
             tool = self.tools.get(name)
             if tool is None:
-                raise InvalidParams("unbekanntes Tool: %s" % name)
+                raise InvalidParams("unknown tool: %s" % name)
             arguments = params.get("arguments") or {}
             if not isinstance(arguments, dict):
-                raise InvalidParams("arguments muss ein Objekt sein")
+                raise InvalidParams("arguments must be an object")
             missing = [k for k in tool.schema.get("required", []) if k not in arguments]
             if missing:
-                raise InvalidParams("fehlende Argumente: %s" % ", ".join(missing))
+                raise InvalidParams("missing arguments: %s" % ", ".join(missing))
             return tool.call(arguments)
         if method in ("resources/list", "prompts/list"):
             key = "resources" if method.startswith("resources") else "prompts"
             return {key: []}
-        raise MethodNotFound("nicht unterstuetzte Methode: %s" % method)
+        raise MethodNotFound("unsupported method: %s" % method)
 
     def _initialize(self, params):
         wanted = params.get("protocolVersion")

@@ -43,6 +43,49 @@ def report(step, exc):
     mcp_logbuf.log("main: %s failed -- %s: %s" % (step, type(exc).__name__, exc))
 
 
+def pump(milliseconds):
+    """Run LVGL for a while so a freshly drawn screen actually reaches the panel.
+
+    Without this the splash would sit in the framebuffer until the main loop starts.
+    """
+    end = time.ticks_add(time.ticks_ms(), milliseconds)
+    last = time.ticks_ms()
+    while time.ticks_diff(end, time.ticks_ms()) > 0:
+        now = time.ticks_ms()
+        lv.tick_inc(time.ticks_diff(now, last))
+        last = now
+        lv.timer_handler()
+        time.sleep_ms(5)
+
+
+def show_splash(text):
+    """Light, unmistakable screen.
+
+    A dark application theme on a small panel is easily mistaken for a dead display,
+    so every boot starts with a bright screen.
+    """
+    scr = lv.screen_active()
+    try:
+        scr.clean()
+    except Exception:  # noqa: BLE001
+        pass
+    scr.set_style_bg_color(lv.color_hex(0xF2F7FC), 0)
+
+    title = lv.label(scr)
+    title.set_text("ESP32-S3")
+    font = getattr(lv, "font_montserrat_28", None) or getattr(lv, "font_montserrat_16", None)
+    if font is not None:
+        title.set_style_text_font(font, 0)
+    title.set_style_text_color(lv.color_hex(0x14314F), 0)
+    title.align(lv.ALIGN.CENTER, 0, -34)
+
+    info = lv.label(scr)
+    info.set_text(text)
+    info.set_style_text_color(lv.color_hex(0x35536F), 0)
+    info.align(lv.ALIGN.CENTER, 0, 22)
+    pump(700)
+
+
 def start_display():
     global _DISPLAY
     _DISPLAY, _bus = display_config.create_display()
@@ -65,6 +108,37 @@ def device_ip():
     except Exception:  # noqa: BLE001
         pass
     return "offline"
+
+
+_retry_state = {"last": 0}
+
+
+def sta_retry_hook():
+    """Retry the WiFi join in the background after a slow boot (portal.STA_RETRY).
+
+    Called from the main loop, so it must not block: connect() returns immediately and
+    the connection is picked up on one of the next attempts.
+    """
+    if not portal.STA_RETRY:
+        return
+    now = time.ticks_ms()
+    if time.ticks_diff(now, _retry_state["last"]) < 15000:
+        return
+    _retry_state["last"] = now
+    try:
+        import network
+        import boot
+        sta = network.WLAN(network.STA_IF)
+        if sta.isconnected():
+            portal.STA_RETRY = False
+            mcp_logbuf.log("main: WiFi up: %s" % (sta.ifconfig()[0],))
+            return
+        cfg = boot.load_credentials()
+        sta.active(True)
+        sta.connect(cfg.get("ssid"), cfg.get("password"))
+        mcp_logbuf.log("main: WiFi join retry (%s)" % cfg.get("ssid"))
+    except Exception as exc:  # noqa: BLE001
+        mcp_logbuf.log("main: WiFi retry failed -- %s: %s" % (type(exc).__name__, exc))
 
 
 def build_demo_ui(ip):
@@ -138,21 +212,28 @@ def start_app():
 
 
 def build_setup_hint():
-    """Screen shown in setup mode."""
+    """Screen shown in setup mode: bright, so it cannot be read as a dead panel."""
     scr = lv.screen_active()
-    scr.set_style_bg_color(lv.color_hex(0x101820), 0)
+    try:
+        scr.clean()
+    except Exception:  # noqa: BLE001
+        pass
+    scr.set_style_bg_color(lv.color_hex(0xFFF6E5), 0)
 
     title = lv.label(scr)
     title.set_text("SETUP MODE")
-    title.set_style_text_color(lv.color_hex(0xFFFFFF), 0)
-    title.align(lv.ALIGN.TOP_MID, 0, 20)
+    font = getattr(lv, "font_montserrat_24", None) or getattr(lv, "font_montserrat_16", None)
+    if font is not None:
+        title.set_style_text_font(font, 0)
+    title.set_style_text_color(lv.color_hex(0x8A4B00), 0)
+    title.align(lv.ALIGN.TOP_MID, 0, 24)
 
     info = lv.label(scr)
-    info.set_text("1. Join WiFi %r\n2. Open http://%s/\n\nConfigure your network and\n"
-                  "the display in the browser."
-                  % (portal.AP_SSID_DEFAULT, portal.AP_IP))
-    info.set_style_text_color(lv.color_hex(0x8FD4FF), 0)
-    info.align(lv.ALIGN.TOP_LEFT, 12, 70)
+    info.set_text("1. Join WiFi %r\n2. Open http://%s/\n\nConfigure your network\nand the display\n"
+                  "in the browser." % (portal.AP_SSID_DEFAULT, portal.AP_IP))
+    info.set_style_text_color(lv.color_hex(0x3A3A3A), 0)
+    info.align(lv.ALIGN.TOP_LEFT, 14, 78)
+    pump(600)
     mcp_logbuf.log("main: setup hint shown")
 
 
@@ -195,10 +276,22 @@ def main():
         start_touch()
     except Exception as exc:  # noqa: BLE001
         report("touch", exc)
+    app_name = display_config.load_config().get("app") or "launcher"
+    try:
+        show_splash("%s\nhttp://%s/" % (app_name, ip))
+    except Exception as exc:  # noqa: BLE001
+        report("splash", exc)
     try:
         start_app()
     except Exception as exc:  # noqa: BLE001
         report("app", exc)
+    # Push the application's first frame. Building it before the main loop means its
+    # flush happens without a subsequent refresh, and on this panel the previously
+    # shown frame (the splash) would stay on the glass.
+    try:
+        pump(250)
+    except Exception as exc:  # noqa: BLE001
+        report("first frame", exc)
     try:
         mcp_serve.start(port=80)
         print("main: debug server on http://%s/" % ip)
@@ -218,6 +311,8 @@ def main():
     #    Exception, and without re-raising, the board is unreachable for Ctrl-C
     #    (and therefore for mpremote).
     _LOOP_HOOKS.insert(0, mcp_screen.service_requests)
+    if portal.STA_RETRY:
+        _LOOP_HOOKS.append(sta_retry_hook)
     last_tick = time.ticks_ms()
     while True:
         try:

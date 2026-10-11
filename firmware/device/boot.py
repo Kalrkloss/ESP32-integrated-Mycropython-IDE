@@ -18,7 +18,7 @@ import portal
 
 CONFIG_FILE = "config.json"  # web UI: WiFi + display + device name
 WIFI_FILE = "wifi.json"      # legacy location, still read
-TIMEOUT_S = 20
+TIMEOUT_S = 45               # generous: a slow DHCP must not change the mode
 
 
 def load_credentials():
@@ -86,10 +86,14 @@ def main():
         open_setup_ap(cfg)
         return
     print("boot: credentials loaded (%s)" % ", ".join(sorted(cfg)))
-    if not connect(cfg):
-        # Reachable fallback: the user can fix the configuration over the portal
-        # instead of having to reach the board by cable.
-        open_setup_ap(cfg)
+    if connect(cfg):
+        return
+    # Credentials exist but the join did not finish in time. Do NOT switch to setup
+    # mode: that would replace the running application with a configuration page and
+    # restrict the web UI just because a DHCP lease was slow. Keep the normal mode and
+    # let main.py retry the join in the background (portal.STA_RETRY).
+    portal.STA_RETRY = True
+    print("boot: join failed -- staying in normal mode, retrying in the background")
 
 
 try:

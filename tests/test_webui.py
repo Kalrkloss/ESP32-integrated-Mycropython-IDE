@@ -1,9 +1,9 @@
-"""Host-Tests fuer die Weboberflaeche (laeuft ohne ESP32, mit CPython).
+"""Host tests for the web UI (runs without an ESP32, under CPython).
 
-Geprueft werden: Aufbau der Seite (IDs, Handler, Klammern), die API-Handler gegen ein
-temporaeres Dateisystem und der komplette Weg ueber einen echten HTTP-Socket.
+Checked here: the page structure (IDs, handlers, brackets), the API handlers against a
+temporary filesystem, and the whole path over a real HTTP socket.
 
-Aufruf:  python3 tests/test_webui.py
+Run:  python3 tests/test_webui.py
 """
 
 import json
@@ -51,33 +51,33 @@ def text_of(resp):
     return resp.body
 
 
-# ---------------------------------------------------------------- Seite
+# ---------------------------------------------------------------- Page
 
 def read(name):
     with open(os.path.join(WEBFILES, name)) as fh:
         return fh.read()
 
 
-def js_syntax(pfad):
-    """Echte Syntaxpruefung mit node -- Klammerzaehlen findet nicht jeden Fehler.
-    (Genau daran ist die erste Fassung gescheitert: ein \\n wurde zum echten
-    Zeilenumbruch und riss das ganze Skript mit.)"""
+def js_syntax(path):
+    """Real syntax check with node -- counting brackets does not catch every error.
+    (That is exactly what the first version failed on: a \\n became a real
+    line break and took the whole script down with it.)"""
     node = shutil.which("node")
     if not node:
         return None
-    fertig = subprocess.run([node, "--check", pfad], capture_output=True)
-    return fertig.returncode == 0, (fertig.stderr or b"").decode()[:300]
+    finished = subprocess.run([node, "--check", path], capture_output=True)
+    return finished.returncode == 0, (finished.stderr or b"").decode()[:300]
 
 
-def test_seite():
-    print("Die Seite")
+def test_page():
+    print("The page")
     html = read("index.html")
     js = read("app.js")
     css = read("app.css")
-    check("Seite ist HTML", html.lstrip().startswith("<!DOCTYPE html>"))
-    check("Seite ist abgeschlossen", html.rstrip().endswith("</html>"))
-    check("Groesse im Rahmen (<40 KB)", len(html) < 40000, "%d Byte" % len(html))
-    check("keine externen Abhaengigkeiten",
+    check("Page is HTML", html.lstrip().startswith("<!DOCTYPE html>"))
+    check("Page is complete", html.rstrip().endswith("</html>"))
+    check("Size within bounds (<40 KB)", len(html) < 40000, "%d Byte" % len(html))
+    check("no external dependencies",
           "http://" not in html.replace("http://www.w3.org", "") and "https://" not in html)
 
     ids = set(re.findall(r'id="([^"]+)"', html))
@@ -85,393 +85,393 @@ def test_seite():
                  "f-rows", "f-path", "upload", "c-ssid", "c-pass", "c-host", "c-bri",
                  "p-ip", "p-heap", "c-info", "shot-scale", "prev-status",
                  "c-board", "c-app"):
-        check("Element #%s vorhanden" % name, name in ids)
-    check("Vorschau ist eine Leinwand (kein PNG auf dem Geraet)",
+        check("Element #%s present" % name, name in ids)
+    check("Preview is a canvas (no PNG on the device)",
           '<canvas class="prev" id="prev"' in html)
-    check("Vorschau holt den Rohpuffer", '"/screen.raw?scale="' in js)
+    check("Preview fetches the raw buffer", '"/screen.raw?scale="' in js)
 
-    # Jede per el("...") angesprochene ID muss es auch geben -- findet Tippfehler.
-    benutzt = set(re.findall(r'el\("([^"]+)"\)', js))
-    fehlend = sorted(benutzt - ids)
-    check("alle angesprochenen IDs existieren", not fehlend, str(fehlend))
+    # Every ID referenced via el("...") must also exist -- catches typos.
+    used = set(re.findall(r'el\("([^"]+)"\)', js))
+    missing = sorted(used - ids)
+    check("all referenced IDs exist", not missing, str(missing))
 
-    # Jeder onclick-Handler muss als Funktion definiert sein.
-    aufrufe = set(re.findall(r'onclick="([a-zA-Z_][a-zA-Z0-9_]*)\(', html))
-    definiert = set(re.findall(r"function\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(", js))
-    fehlend = sorted(aufrufe - definiert)
-    check("alle onclick-Handler sind definiert", not fehlend, str(fehlend))
+    # Every onclick handler must be defined as a function.
+    calls = set(re.findall(r'onclick="([a-zA-Z_][a-zA-Z0-9_]*)\(' , html))
+    defined = set(re.findall(r"function\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(", js))
+    missing = sorted(calls - defined)
+    check("all onclick handlers are defined", not missing, str(missing))
 
-    # Reiter und Abschnitte muessen zusammenpassen.
+    # Tabs and sections must match up.
     for tab in ("repl", "editor", "files", "config"):
-        check("Reiter fuer %s" % tab, 'data-tab="%s"' % tab in html)
+        check("Tab for %s" % tab, 'data-tab="%s"' % tab in html)
 
-    check("HTML verweist auf die getrennten Dateien",
+    check("HTML references the separate files",
           'href="/app.css"' in html and 'src="/app.js"' in html)
-    check("Editor wird mitgeladen",
+    check("Editor is loaded alongside",
           'href="/editor/codemirror.css"' in html and 'src="/editor/codemirror.js"' in html
           and 'src="/editor/python.js"' in html)
-    check("Editor faellt auf das Textfeld zurueck",
+    check("Editor falls back to the textarea",
           'typeof CodeMirror === "undefined"' in js and "editorTasten();" in js)
-    check("Editor liest und schreibt ueber CodeMirror",
+    check("Editor reads and writes through CodeMirror",
           "editor.getValue()" in js and "editor.setValue(text)" in js)
     for name in ("codemirror.js", "codemirror.css", "python.js", "search.js", "dialog.js",
                  "dialog.css", "closebrackets.js", "matchbrackets.js", "active-line.js",
                  "comment.js", "jump-to-line.js", "LICENSE.txt"):
-        check("Editordatei %s vorhanden" % name,
+        check("Editor file %s present" % name,
               os.path.exists(os.path.join(WEBFILES, "editor", name)))
 
-    check("JS-Klammern ausgeglichen",
+    check("JS brackets balanced",
           js.count("{") == js.count("}") and js.count("(") == js.count(")"),
-          "%d/%d geschweift, %d/%d rund" % (js.count("{"), js.count("}"),
-                                            js.count("("), js.count(")")))
-    ergebnis = js_syntax(os.path.join(WEBFILES, "app.js"))
-    if ergebnis is None:
-        print("  .... node fehlt -- Syntaxpruefung uebersprungen")
+          "%d/%d curly, %d/%d round" % (js.count("{"), js.count("}"),
+                                        js.count("("), js.count(")")))
+    result = js_syntax(os.path.join(WEBFILES, "app.js"))
+    if result is None:
+        print("  .... node missing -- syntax check skipped")
     else:
-        gueltig, fehler = ergebnis
-        check("app.js syntaktisch gueltig", gueltig, fehler)
+        valid, error = result
+        check("app.js syntactically valid", valid, error)
 
-    check("keine uebrig gebliebenen Platzhalter", "%s" not in html and "@@" not in html)
-    for name, inhalt in (("index.html", html), ("app.js", js), ("app.css", css)):
-        check("%s ohne eingestreute Fremdzeichen" % name,
-              not re.search(r"[\u4e00-\u9fff]", inhalt))
-    # Im JS-String darf kein echtes Zeilenende stehen (Escaping-Falle).
-    schlecht = [z for z in js.split("\n") if z.count('"') % 2 == 1 and "//" not in z]
-    check("keine abgerissenen JS-Zeichenketten", not schlecht, str(schlecht[:2]))
+    check("no leftover placeholders", "%s" not in html and "@@" not in html)
+    for name, content in (("index.html", html), ("app.js", js), ("app.css", css)):
+        check("%s without foreign characters mixed in" % name,
+              not re.search(r"[\u4e00-\u9fff]", content))
+    # There must be no real line break inside a JS string (escaping trap).
+    bad = [z for z in js.split("\n") if z.count('"') % 2 == 1 and "//" not in z]
+    check("no torn JS string literals", not bad, str(bad[:2]))
 
 
-def test_setup_seite():
-    print("Setup-Seite")
+def test_setup_page():
+    print("Setup page")
     html = read("setup.html")
     script = read("setup.js")
     ids = set(re.findall(r'id="([^"]+)"', html))
     for name in ("ssid", "password", "hostname", "ap_ssid", "ap_password", "board",
                  "board-info", "form-display", "form-touch", "status", "err", "chip",
                  "drivers"):
-        check("Element #%s vorhanden" % name, name in ids)
-    check("Setup-Seite laedt das eigene Skript", 'src="/setup.js"' in html)
-    check("Setup-Seite nutzt das gemeinsame Stylesheet", 'href="/app.css"' in html)
-    check("kein CDN in der Setup-Seite", "http://" not in html.replace("http://www.w3.org", ""))
-    check("Setup-Seite kennt die Profil-API", "/api/profiles" in script)
-    check("Setup-Seite kennt die Treiber-API", "/api/drivers" in script)
-    check("Setup-Seite speichert ueber die API", '"/api/config"' in script)
-    check("Setup-Seite kann neu starten", '"/api/reset"' in script)
-    check("Setup-Seite fordert eine SSID",
+        check("Element #%s present" % name, name in ids)
+    check("Setup page loads its own script", 'src="/setup.js"' in html)
+    check("Setup page uses the shared stylesheet", 'href="/app.css"' in html)
+    check("no CDN in the setup page", "http://" not in html.replace("http://www.w3.org", ""))
+    check("Setup page knows the profile API", "/api/profiles" in script)
+    check("Setup page knows the driver API", "/api/drivers" in script)
+    check("Setup page saves via the API", '"/api/config"' in script)
+    check("Setup page can restart", '"/api/reset"' in script)
+    check("Setup page requires an SSID",
           "WiFi name is required" in script)
-    check("keine deutschen Umlaute in der Setup-Seite",
+    check("no German umlauts in the setup page",
           not set("äöüÄÖÜß") & set(html + script))
-    check("Setup-Syntax ok (node)", js_syntax(os.path.join(WEBFILES, "setup.js")))
-    check("Setup-CSS vorhanden", ".setup" in read("app.css"))
-    check("Hauptseite verlinkt die Einrichtung",
+    check("Setup syntax ok (node)", js_syntax(os.path.join(WEBFILES, "setup.js")))
+    check("Setup CSS present", ".setup" in read("app.css"))
+    check("Main page links the setup",
           "setup" in read("app.js").lower() or "setup" in read("index.html").lower())
 
 
-def test_routen():
-    print("Routen")
-    routen = webui.build_routes()
-    for schluessel in ("GET /", "GET /api/state", "POST /api/exec", "GET /api/log",
-                       "GET /api/files", "GET /api/file", "POST /api/file",
-                       "DELETE /api/file", "POST /api/mkdir", "POST /api/rename",
-                       "GET /api/config", "POST /api/config", "GET /api/screen.png",
-                       "POST /api/reset", "GET /status", "GET /editor/*",
-                       "GET /setup", "GET /setup.js", "GET /api/profiles",
-                       "GET /api/drivers"):
-        check("Route %s" % schluessel, schluessel in routen)
+def test_routes():
+    print("Routes")
+    routes = webui.build_routes()
+    for key in ("GET /", "GET /api/state", "POST /api/exec", "GET /api/log",
+                "GET /api/files", "GET /api/file", "POST /api/file",
+                "DELETE /api/file", "POST /api/mkdir", "POST /api/rename",
+                "GET /api/config", "POST /api/config", "GET /api/screen.png",
+                "POST /api/reset", "GET /status", "GET /editor/*",
+                "GET /setup", "GET /setup.js", "GET /api/profiles",
+                "GET /api/drivers"):
+        check("Route %s" % key, key in routes)
     _, server = serve.build_server(port=0)
-    check("Weboberflaeche haengt im Server", "GET /api/files" in server.routes)
-    check("Klartext-Status bleibt", "GET /status" in server.routes)
+    check("Web UI is attached to the server", "GET /api/files" in server.routes)
+    check("Plain-text status remains", "GET /status" in server.routes)
 
     # Setup mode serves configuration only: no MCP, no code execution, no files.
-    einrichten = webui.setup_routes()
-    check("Setup-Route vorhanden", "GET /setup" in einrichten)
-    check("Setup ohne Codeausfuehrung", "POST /api/exec" not in einrichten)
-    check("Setup ohne MCP", "POST /mcp" not in einrichten)
-    check("Setup ohne Dateizugriff", "GET /api/files" not in einrichten)
+    setup_routes = webui.setup_routes()
+    check("Setup route present", "GET /setup" in setup_routes)
+    check("Setup without code execution", "POST /api/exec" not in setup_routes)
+    check("Setup without MCP", "POST /mcp" not in setup_routes)
+    check("Setup without file access", "GET /api/files" not in setup_routes)
     _, setup_server = serve.build_server(port=0, setup_only=True)
-    finde_setup = setup_server._find_handler
-    check("Setup-Modus liefert die Konfigseite",
-          finde_setup("GET", "/") is not None and finde_setup("GET", "/setup") is not None)
-    check("Setup-Modus leitet Unbekanntes um", finde_setup("GET", "/generate_204") is not None)
-    check("Setup-Modus leitet Codeausfuehrung um statt sie auszufuehren",
-          finde_setup("POST", "/api/exec") is webui.portal_redirect)
-    check("Setup-Modus leitet Dateizugriff um", finde_setup("GET", "/api/files") is webui.portal_redirect)
+    find_setup = setup_server._find_handler
+    check("Setup mode serves the config page",
+          find_setup("GET", "/") is not None and find_setup("GET", "/setup") is not None)
+    check("Setup mode redirects unknown paths", find_setup("GET", "/generate_204") is not None)
+    check("Setup mode redirects code execution instead of running it",
+          find_setup("POST", "/api/exec") is webui.portal_redirect)
+    check("Setup mode redirects file access", find_setup("GET", "/api/files") is webui.portal_redirect)
 
-    # Praefix-Routen (Schluessel endet auf "*") aufloesen
-    finde = server._find_handler
-    check("Praefix-Route trifft Editor-Datei",
-          finde("GET", "/editor/codemirror.js") is not None)
-    check("exakte Route hat Vorrang",
-          finde("GET", "/app.js") is not None and finde("GET", "/app.js") is not finde("GET", "/editor/x"))
-    check("unbekannter Pfad ohne Handler", finde("GET", "/gibtsnicht") is None)
-    check("falsche Methode ohne Handler", finde("POST", "/editor/codemirror.js") is None)
+    # Resolve prefix routes (key ends with "*")
+    find = server._find_handler
+    check("Prefix route matches editor file",
+          find("GET", "/editor/codemirror.js") is not None)
+    check("exact route takes precedence",
+          find("GET", "/app.js") is not None and find("GET", "/app.js") is not find("GET", "/editor/x"))
+    check("unknown path has no handler", find("GET", "/doesnotexist") is None)
+    check("wrong method has no handler", find("POST", "/editor/codemirror.js") is None)
 
 
-# ---------------------------------------------------------------- API gegen tmp
+# ---------------------------------------------------------------- API against tmp
 
-def test_dateien(tmp):
-    print("Dateien (API)")
+def test_files(tmp):
+    print("Files (API)")
     os.makedirs(os.path.join(tmp, "lib"))
     with open(os.path.join(tmp, "main.py"), "w") as fh:
-        fh.write("print('hallo')\n")
-    with open(os.path.join(tmp, "bild.png"), "wb") as fh:
+        fh.write("print('hello')\n")
+    with open(os.path.join(tmp, "image.png"), "wb") as fh:
         fh.write(bytes(range(256)))
 
-    antwort = json.loads(text_of(webui.api_files(req("GET", "/api/files", {"path": "/"}))))
-    namen = [e["name"] for e in antwort["entries"]]
-    check("Eintraege gelistet", "main.py" in namen and "lib" in namen, str(namen))
-    check("Verzeichnis zuerst", namen[0] == "lib", str(namen))
-    check("Verzeichnis markiert", [e["dir"] for e in antwort["entries"] if e["name"] == "lib"] == [True])
-    check("Groesse gemeldet", [e["size"] for e in antwort["entries"] if e["name"] == "main.py"] == [15])
-    check("Speicherinfo dabei", "frei" in antwort.get("speicher", {}))
-    check("Unterordner listbar",
+    response = json.loads(text_of(webui.api_files(req("GET", "/api/files", {"path": "/"}))))
+    names = [e["name"] for e in response["entries"]]
+    check("entries listed", "main.py" in names and "lib" in names, str(names))
+    check("directory first", names[0] == "lib", str(names))
+    check("directory marked", [e["dir"] for e in response["entries"] if e["name"] == "lib"] == [True])
+    check("size reported", [e["size"] for e in response["entries"] if e["name"] == "main.py"] == [15])
+    check("memory info included", "free" in response.get("memory", {}))
+    check("subfolder listable",
           json.loads(text_of(webui.api_files(req("GET", "/api/files", {"path": "/lib"}))))["entries"] == [])
 
-    # lesen
-    antwort = json.loads(text_of(webui.api_file_get(req("GET", "/api/file", {"path": "/main.py"}))))
-    check("Datei lesbar", antwort["data"] == "print('hallo')\n")
-    check("Text als Text", antwort["binary"] is False)
+    # read
+    response = json.loads(text_of(webui.api_file_get(req("GET", "/api/file", {"path": "/main.py"}))))
+    check("file readable", response["data"] == "print('hello')\n")
+    check("text as text", response["binary"] is False)
 
-    antwort = json.loads(text_of(webui.api_file_get(req("GET", "/api/file", {"path": "/bild.png"}))))
-    check("Binaerdatei erkannt", antwort["binary"] is True and antwort["size"] == 256)
+    response = json.loads(text_of(webui.api_file_get(req("GET", "/api/file", {"path": "/image.png"}))))
+    check("binary file detected", response["binary"] is True and response["size"] == 256)
 
-    resp = webui.api_file_get(req("GET", "/api/file", {"path": "/bild.png", "download": "1"}))
-    check("Download liefert Anhang", resp.headers.get("Content-Disposition", "").startswith("attachment"))
-    check("Download liefert Bytes", resp.body == bytes(range(256)))
+    resp = webui.api_file_get(req("GET", "/api/file", {"path": "/image.png", "download": "1"}))
+    check("download returns attachment", resp.headers.get("Content-Disposition", "").startswith("attachment"))
+    check("download returns bytes", resp.body == bytes(range(256)))
 
-    antwort = json.loads(text_of(webui.api_file_get(req("GET", "/api/file", {"path": "/gibtsnicht"}))))
-    check("fehlende Datei gemeldet", "error" in antwort)
+    response = json.loads(text_of(webui.api_file_get(req("GET", "/api/file", {"path": "/doesnotexist"}))))
+    check("missing file reported", "error" in response)
 
-    # schreiben
-    antwort = json.loads(text_of(webui.api_file_put(
-        req("POST", "/api/file", {"path": "/neu.txt"}, b"inhalt")))
+    # write
+    response = json.loads(text_of(webui.api_file_put(
+        req("POST", "/api/file", {"path": "/new.txt"}, b"sample")))
     )
-    check("Datei geschrieben", antwort["ok"] and antwort["bytes"] == 6)
-    with open(os.path.join(tmp, "neu.txt")) as fh:
-        check("Inhalt stimmt", fh.read() == "inhalt")
+    check("file written", response["ok"] and response["bytes"] == 6)
+    with open(os.path.join(tmp, "new.txt")) as fh:
+        check("content matches", fh.read() == "sample")
 
-    # JSON-Variante
-    antwort = json.loads(text_of(webui.api_file_put(
+    # JSON variant
+    response = json.loads(text_of(webui.api_file_put(
         req("POST", "/api/file", {}, json.dumps({"path": "/json.txt", "data": "abc"}).encode())))
     )
-    check("Schreiben per JSON", antwort["ok"] and os.path.exists(os.path.join(tmp, "json.txt")))
+    check("write via JSON", response["ok"] and os.path.exists(os.path.join(tmp, "json.txt")))
 
-    check("Schreiben ohne Pfad abgelehnt",
+    check("write without path rejected",
           webui.api_file_put(req("POST", "/api/file", {}, b"x")).status == 400)
-    check("zu grosse Datei abgelehnt",
-          webui.api_file_put(req("POST", "/api/file", {"path": "/gross"},
+    check("file too large rejected",
+          webui.api_file_put(req("POST", "/api/file", {"path": "/big"},
                                  b"x" * (webui.MAX_UPLOAD + 1))).status == 413)
 
-    # Unterordner wird beim Schreiben angelegt
-    antwort = json.loads(text_of(webui.api_file_put(
-        req("POST", "/api/file", {"path": "/tief/drin.txt"}, b"tief"))))
-    check("fehlender Ordner wird angelegt",
-          antwort["ok"] and os.path.exists(os.path.join(tmp, "tief", "drin.txt")))
+    # a subfolder is created on write
+    response = json.loads(text_of(webui.api_file_put(
+        req("POST", "/api/file", {"path": "/deep/inside.txt"}, b"deep"))))
+    check("missing folder is created",
+          response["ok"] and os.path.exists(os.path.join(tmp, "deep", "inside.txt")))
 
     # mkdir / rename / delete
     check("mkdir", json.loads(text_of(webui.api_file_mkdir(
-        req("POST", "/api/mkdir", {}, b'{"path": "/daten"}'))))["ok"])
-    check("Ordner existiert", os.path.isdir(os.path.join(tmp, "daten")))
+        req("POST", "/api/mkdir", {}, b'{"path": "/data"}'))))["ok"])
+    check("folder exists", os.path.isdir(os.path.join(tmp, "data")))
     check("rename", json.loads(text_of(webui.api_file_rename(
-        req("POST", "/api/rename", {}, b'{"old": "/neu.txt", "new": "/daten/alt.txt"}'))))["ok"])
-    check("Datei umbenannt", os.path.exists(os.path.join(tmp, "daten", "alt.txt")))
-    check("delete Datei", json.loads(text_of(webui.api_file_delete(
-        req("DELETE", "/api/file", {}, b'{"path": "/daten/alt.txt"}'))))["ok"])
-    check("delete Ordner", json.loads(text_of(webui.api_file_delete(
-        req("DELETE", "/api/file", {}, b'{"path": "/daten"}'))))["ok"])
-    check("Ordner weg", not os.path.exists(os.path.join(tmp, "daten")))
+        req("POST", "/api/rename", {}, b'{"old": "/new.txt", "new": "/data/old.txt"}'))))["ok"])
+    check("file renamed", os.path.exists(os.path.join(tmp, "data", "old.txt")))
+    check("delete file", json.loads(text_of(webui.api_file_delete(
+        req("DELETE", "/api/file", {}, b'{"path": "/data/old.txt"}'))))["ok"])
+    check("delete folder", json.loads(text_of(webui.api_file_delete(
+        req("DELETE", "/api/file", {}, b'{"path": "/data"}'))))["ok"])
+    check("folder gone", not os.path.exists(os.path.join(tmp, "data")))
 
-    # Ausbruch aus dem Wurzelverzeichnis verhindern
-    webui.api_file_put(req("POST", "/api/file", {"path": "/../../ausbruch.txt"}, b"nein"))
-    check("kein Ausbruch aus dem Wurzelverzeichnis",
-          not os.path.exists(os.path.join(os.path.dirname(tmp), "ausbruch.txt")))
-    check("Pfad bleibt im Wurzelverzeichnis",
+    # prevent escaping the root directory
+    webui.api_file_put(req("POST", "/api/file", {"path": "/../../escape.txt"}, b"no"))
+    check("no escape from the root directory",
+          not os.path.exists(os.path.join(os.path.dirname(tmp), "escape.txt")))
+    check("path stays inside the root directory",
           webui.real_path("/../../x").startswith(tmp))
 
 
-def test_konfiguration(tmp):
-    print("Konfiguration")
+def test_configuration(tmp):
+    print("Configuration")
     start = webui.config_lesen()
-    check("Standardwerte vorhanden",
+    check("default values present",
           start["hostname"] == "esp32-debug" and start["display"]["brightness"] == 70)
-    check("Display- und Touch-Abschnitt vorhanden",
+    check("display and touch section present",
           "driver" in start["display"] and "driver" in start["touch"])
-    antwort = json.loads(text_of(webui.api_config(req("POST", "/api/config", {}, json.dumps(
-        {"ssid": "Netz", "password": "Geheim", "hostname": "brett", "brightness": 30,
-         "unbekannt": "ignoriert"}).encode()))))
-    check("Speichern liefert Konfiguration", antwort["config"]["ssid"] == "Netz")
-    check("unbekannter Schluessel ignoriert", "unbekannt" not in antwort["config"])
-    danach = webui.config_lesen()
-    check("Werte bleiben erhalten",
-          danach["hostname"] == "brett" and danach["display"]["brightness"] == 30)
-    check("Datei liegt auf dem Geraet", os.path.exists(os.path.join(tmp, "config.json")))
-    check("Lesen ueber GET",
-          json.loads(text_of(webui.api_config(req("GET", "/api/config"))))["config"]["ssid"] == "Netz")
+    response = json.loads(text_of(webui.api_config(req("POST", "/api/config", {}, json.dumps(
+        {"ssid": "Net", "password": "Secret", "hostname": "board", "brightness": 30,
+         "unknown": "ignored"}).encode()))))
+    check("saving returns the configuration", response["config"]["ssid"] == "Net")
+    check("unknown key ignored", "unknown" not in response["config"])
+    after = webui.config_lesen()
+    check("values persist",
+          after["hostname"] == "board" and after["display"]["brightness"] == 30)
+    check("file lives on the device", os.path.exists(os.path.join(tmp, "config.json")))
+    check("read via GET",
+          json.loads(text_of(webui.api_config(req("GET", "/api/config"))))["config"]["ssid"] == "Net")
     # Display/Touch sections are merged field by field, a profile provides the base.
     webui.config_schreiben({"board": "JC3248W535", "display": {"brightness": 42},
                             "touch": {"scl": 7}})
-    nach_profil = webui.config_lesen()
-    check("Profil liefert Pins", nach_profil["display"]["sck"] == 47,
-          str(nach_profil["display"].get("sck")))
-    check("eigener Wert gewinnt", nach_profil["display"]["brightness"] == 42)
-    check("nicht genannte Felder bleiben", nach_profil["display"]["width"] == 320)
-    check("Touch-Abschnitt gemischt",
-          nach_profil["touch"]["scl"] == 7 and nach_profil["touch"]["sda"] == 4)
-    # Passwort darf nie an den Browser gehen -- aber auch nicht verloren gehen.
-    sichtbar = json.loads(text_of(webui.api_config(req("GET", "/api/config"))))["config"]
-    check("Passwort wird nicht ausgeliefert", sichtbar["password"] == "")
-    check("Passwort als gesetzt markiert", sichtbar["password_gesetzt"] is True)
+    after_profile = webui.config_lesen()
+    check("profile provides pins", after_profile["display"]["sck"] == 47,
+          str(after_profile["display"].get("sck")))
+    check("own value wins", after_profile["display"]["brightness"] == 42)
+    check("unmentioned fields remain", after_profile["display"]["width"] == 320)
+    check("touch section merged",
+          after_profile["touch"]["scl"] == 7 and after_profile["touch"]["sda"] == 4)
+    # Password must never reach the browser -- but must not be lost either.
+    visible = json.loads(text_of(webui.api_config(req("GET", "/api/config"))))["config"]
+    check("password is not served", visible["password"] == "")
+    check("password marked as set", visible["password_gesetzt"] is True)
     webui.api_config(req("POST", "/api/config", {}, json.dumps(
-        {"hostname": "brett2", "password": ""}).encode()))
-    check("leeres Passwort loescht nichts", webui.config_lesen(mit_passwort=True)["password"] == "Geheim")
+        {"hostname": "board2", "password": ""}).encode()))
+    check("empty password deletes nothing", webui.config_lesen(mit_passwort=True)["password"] == "Secret")
     webui.api_config(req("POST", "/api/config", {}, json.dumps(
-        {"password": "Neu"}).encode()))
-    check("neues Passwort uebernommen", webui.config_lesen(mit_passwort=True)["password"] == "Neu")
-    # wifi.json bleibt als Basis nutzbar (Altbestand), aber nur fuer leere Felder
+        {"password": "New"}).encode()))
+    check("new password adopted", webui.config_lesen(mit_passwort=True)["password"] == "New")
+    # wifi.json stays usable as a base (legacy data), but only for empty fields
     with open(os.path.join(tmp, "wifi.json"), "w") as fh:
-        json.dump({"ssid": "Alt-Netz", "password": "Alt-Geheim", "hostname": "alt"}, fh)
-    webui.config_schreiben({"ssid": "", "hostname": "brett3", "brightness": 40})
-    wirksam = webui.config_lesen()
-    check("leere SSID -> wifi.json liefert sie", wirksam["ssid"] == "Alt-Netz", wirksam["ssid"])
-    check("gesetzter Hostname gewinnt", wirksam["hostname"] == "brett3", wirksam["hostname"])
-    check("Helligkeit bleibt erhalten", wirksam["display"]["brightness"] == 40)
-    check("Altbestand-Passwort bleibt nutzbar",
-          webui.config_lesen(mit_passwort=True)["password"] == "Neu")
+        json.dump({"ssid": "Old-Net", "password": "Old-Secret", "hostname": "old"}, fh)
+    webui.config_schreiben({"ssid": "", "hostname": "board3", "brightness": 40})
+    effective = webui.config_lesen()
+    check("empty SSID -> wifi.json provides it", effective["ssid"] == "Old-Net", effective["ssid"])
+    check("set hostname wins", effective["hostname"] == "board3", effective["hostname"])
+    check("brightness persists", effective["display"]["brightness"] == 40)
+    check("legacy password stays usable",
+          webui.config_lesen(mit_passwort=True)["password"] == "New")
     # A profile only provides the fields that were never stored explicitly.
     os.remove(os.path.join(tmp, "config.json"))
     webui.config_schreiben({"board": "CUSTOM"})
-    check("Profil liefert den Treiber, solange nichts Eigenes gespeichert ist",
+    check("profile provides the driver as long as nothing of its own is stored",
           webui.config_lesen()["display"]["driver"] == "st7789",
           webui.config_lesen()["display"]["driver"])
-    check("nach dem Loeschen greift wieder der Altbestand",
-          webui.config_lesen(mit_passwort=True)["password"] == "Alt-Geheim",
+    check("after deletion the legacy data applies again",
+          webui.config_lesen(mit_passwort=True)["password"] == "Old-Secret",
           webui.config_lesen(mit_passwort=True)["password"])
     # Profile and driver lists feed the setup page
     display_config = sys.modules["display_config"]
-    echt_chip = display_config.chip_name
+    real_chip = display_config.chip_name
     display_config.chip_name = lambda: "esp32s3"     # host runs on x86_64
     try:
         profile = json.loads(text_of(webui.api_profiles(req("GET", "/api/profiles"))))
-        check("Profile fuer diesen Chip",
+        check("profiles for this chip",
               len(profile["profiles"]) >= 2
               and all(p["chip"] == profile["chip"] for p in profile["profiles"]),
               str(profile.get("chip")))
-        check("Profil enthaelt Pins", "display" in profile["profiles"][0])
-        check("Chip-Typ wird mitgeliefert", profile["chip"] == "esp32s3")
+        check("profile contains pins", "display" in profile["profiles"][0])
+        check("chip type is included", profile["chip"] == "esp32s3")
     finally:
-        display_config.chip_name = echt_chip
-    treiber = json.loads(text_of(webui.api_drivers(req("GET", "/api/drivers"))))
-    check("Treiberlisten vorhanden",
-          isinstance(treiber["display"], list) and isinstance(treiber["touch"], list))
+        display_config.chip_name = real_chip
+    drivers = json.loads(text_of(webui.api_drivers(req("GET", "/api/drivers"))))
+    check("driver lists present",
+          isinstance(drivers["display"], list) and isinstance(drivers["touch"], list))
     # Device-only trap: this MicroPython build has no os.path. Emulate that on the
     # host, otherwise the bug only shows up on the board.
     import types
-    ohne_pfad = types.ModuleType("os")
+    without_path = types.ModuleType("os")
     for name in ("listdir", "stat", "mkdir", "remove", "rename", "rmdir", "uname"):
         if hasattr(os, name):
-            setattr(ohne_pfad, name, getattr(os, name))
-    echt_os = display_config.os
-    display_config.os = ohne_pfad
+            setattr(without_path, name, getattr(os, name))
+    real_os = display_config.os
+    display_config.os = without_path
     try:
-        treiber = display_config.available_drivers()
-        check("Treiberliste ohne os.path",
-              isinstance(treiber["display"], list) and isinstance(treiber["touch"], list),
-              str(treiber))
-        check("Treiber aus /drv werden gefunden", "axs15231b" in treiber["display"]
-              or not treiber["display"], str(treiber["display"][:3]))
+        drivers = display_config.available_drivers()
+        check("driver list without os.path",
+              isinstance(drivers["display"], list) and isinstance(drivers["touch"], list),
+              str(drivers))
+        check("drivers from /drv are found", "axs15231b" in drivers["display"]
+              or not drivers["display"], str(drivers["display"][:3]))
     finally:
-        display_config.os = echt_os
+        display_config.os = real_os
 
 
 def test_exec():
-    print("Konsole (exec)")
-    antwort = json.loads(text_of(webui.api_exec(
+    print("Console (exec)")
+    response = json.loads(text_of(webui.api_exec(
         req("POST", "/api/exec", {}, json.dumps({"code": "print(6*7)"}).encode()))))
-    check("Ausgabe von print kommt zurueck", "42" in antwort["output"])
-    antwort = json.loads(text_of(webui.api_exec(req("POST", "/api/exec", {}, b"print('roh')"))))
-    check("reiner Text als Code", "roh" in antwort["output"])
-    antwort = json.loads(text_of(webui.api_exec(
+    check("print output comes back", "42" in response["output"])
+    response = json.loads(text_of(webui.api_exec(req("POST", "/api/exec", {}, b"print('raw')"))))
+    check("plain text as code", "raw" in response["output"])
+    response = json.loads(text_of(webui.api_exec(
         req("POST", "/api/exec", {}, json.dumps({"code": "1/0"}).encode()))))
-    check("Fehler wird gemeldet", "ZeroDivisionError" in antwort["output"])
-    check("leerer Code abgelehnt",
+    check("error is reported", "ZeroDivisionError" in response["output"])
+    check("empty code rejected",
           webui.api_exec(req("POST", "/api/exec", {}, b"")).status == 400)
 
 
-def test_httppfad(tmp):
-    print("Ueber HTTP")
+def test_http_path(tmp):
+    print("Over HTTP")
     _, server = serve.build_server(port=0)
     server.start_in_thread()
     port = server.sock.getsockname()[1]
     base = ("127.0.0.1", port)
 
-    def hole(pfad, methode="GET", daten=None, kopf=None):
+    def fetch(path, method="GET", data=None, headers=None):
         s = socket.create_connection(base, timeout=10)
-        kopfzeilen = ["%s %s HTTP/1.1" % (methode, pfad), "Host: localhost",
+        head_lines = ["%s %s HTTP/1.1" % (method, path), "Host: localhost",
                       "Connection: close"]
-        for k in (kopf or []):
-            kopfzeilen.append(k)
-        if daten is not None:
-            kopfzeilen.append("Content-Length: %d" % len(daten))
-        roh = ("\r\n".join(kopfzeilen) + "\r\n\r\n").encode()
-        if daten:
-            roh += daten
-        s.sendall(roh)
-        teile = []
+        for h in (headers or []):
+            head_lines.append(h)
+        if data is not None:
+            head_lines.append("Content-Length: %d" % len(data))
+        raw = ("\r\n".join(head_lines) + "\r\n\r\n").encode()
+        if data:
+            raw += data
+        s.sendall(raw)
+        parts = []
         while True:
-            stueck = s.recv(65536)
-            if not stueck:
+            chunk = s.recv(65536)
+            if not chunk:
                 break
-            teile.append(stueck)
+            parts.append(chunk)
         s.close()
-        Antwort = b"".join(teile)
-        kopf_teil, _, koerper = Antwort.partition(b"\r\n\r\n")
-        return kopf_teil.decode(), koerper
+        response = b"".join(parts)
+        head_part, _, body = response.partition(b"\r\n\r\n")
+        return head_part.decode(), body
 
-    kopf, koerper = hole("/")
-    check("GET / liefert die Seite", kopf.startswith("HTTP/1.1 200") and b"ESP32-S3 Debug" in koerper)
-    check("Seite als HTML", "text/html" in kopf)
+    head, body = fetch("/")
+    check("GET / serves the page", head.startswith("HTTP/1.1 200") and b"ESP32-S3 Debug" in body)
+    check("page as HTML", "text/html" in head)
 
-    kopf, koerper = hole("/status")
-    check("GET /status liefert Klartext", b"debug server" in koerper)
+    head, body = fetch("/status")
+    check("GET /status serves plain text", b"debug server" in body)
 
-    kopf, koerper = hole("/api/files?path=/")
-    check("GET /api/files liefert JSON",
-          kopf.startswith("HTTP/1.1 200") and "entries" in json.loads(koerper.decode()))
+    head, body = fetch("/api/files?path=/")
+    check("GET /api/files serves JSON",
+          head.startswith("HTTP/1.1 200") and "entries" in json.loads(body.decode()))
 
-    kopf, koerper = hole("/api/config", "POST", b'{"brightness": 55}')
-    check("POST /api/config speichert",
-          json.loads(koerper.decode())["config"]["display"]["brightness"] == 55)
+    head, body = fetch("/api/config", "POST", b'{"brightness": 55}')
+    check("POST /api/config saves",
+          json.loads(body.decode())["config"]["display"]["brightness"] == 55)
 
-    kopf, koerper = hole("/api/file?path=/http.txt", "POST", b"ueber http")
-    check("POST /api/file schreibt", json.loads(koerper.decode())["ok"])
+    head, body = fetch("/api/file?path=/http.txt", "POST", b"over http")
+    check("POST /api/file writes", json.loads(body.decode())["ok"])
     with open(os.path.join(tmp, "http.txt")) as fh:
-        check("Inhalt ueber HTTP geschrieben", fh.read() == "ueber http")
-    kopf, koerper = hole("/api/file?path=/http.txt")
-    check("Datei ueber HTTP lesbar", json.loads(koerper.decode())["data"] == "ueber http")
+        check("content written over HTTP", fh.read() == "over http")
+    head, body = fetch("/api/file?path=/http.txt")
+    check("file readable over HTTP", json.loads(body.decode())["data"] == "over http")
 
-    kopf, koerper = hole("/api/exec", "POST", b'{"code": "print(2+2)"}')
-    check("exec ueber HTTP", "4" in json.loads(koerper.decode())["output"])
+    head, body = fetch("/api/exec", "POST", b'{"code": "print(2+2)"}')
+    check("exec over HTTP", "4" in json.loads(body.decode())["output"])
 
-    kopf, koerper = hole("/api/log")
-    check("Log abrufbar", kopf.startswith("HTTP/1.1 200"))
+    head, body = fetch("/api/log")
+    check("log retrievable", head.startswith("HTTP/1.1 200"))
 
-    # Grosse Datei: muss gestueckt und vollstaendig ausgeliefert werden (auf dem Geraet
-    # waere ein 174-KB-Block am Stueck der Ausloeser fuer Speicherprobleme).
-    gross = os.path.join(tmp, "web", "editor", "gross.js")
-    with open(gross, "wb") as fh:
+    # Large file: must be sent chunked and delivered completely (on the device
+    # a 174-KB block at once would be the trigger for memory problems).
+    big = os.path.join(tmp, "web", "editor", "big.js")
+    with open(big, "wb") as fh:
         fh.write(b"/*" + b"x" * 300000 + b"*/")
-    kopf, koerper = hole("/editor/gross.js")
-    check("grosse Datei kommt vollstaendig an",
-          kopf.startswith("HTTP/1.1 200") and len(koerper) == 300004, "%d Byte" % len(koerper))
-    check("Laengenangabe stimmt", "Content-Length: 300004" in kopf)
-    check("Inhalt stimmt", koerper.startswith(b"/*") and koerper.endswith(b"*/"))
-    check("Editor-Datei ueber HTTP",
-          hole("/editor/codemirror.js")[0].startswith("HTTP/1.1 200"))
-    kopf, _ = hole("/editor/../../etc/passwd", "GET", kopf=["X-Test: 1"])
-    check("Ausbruch wird abgewiesen", kopf.startswith("HTTP/1.1 403"), kopf[:40])
-    os.remove(gross)
+    head, body = fetch("/editor/big.js")
+    check("large file arrives complete",
+          head.startswith("HTTP/1.1 200") and len(body) == 300004, "%d Byte" % len(body))
+    check("length header matches", "Content-Length: 300004" in head)
+    check("content matches", body.startswith(b"/*") and body.endswith(b"*/"))
+    check("editor file over HTTP",
+          fetch("/editor/codemirror.js")[0].startswith("HTTP/1.1 200"))
+    head, _ = fetch("/editor/../../etc/passwd", "GET", headers=["X-Test: 1"])
+    check("escape is rejected", head.startswith("HTTP/1.1 403"), head[:40])
+    os.remove(big)
 
-    kopf, koerper = hole("/gibtsnicht")
-    check("unbekannter Pfad -> 404", kopf.startswith("HTTP/1.1 404"))
+    head, body = fetch("/doesnotexist")
+    check("unknown path -> 404", head.startswith("HTTP/1.1 404"))
 
     server.running = False
     try:
@@ -482,34 +482,34 @@ def test_httppfad(tmp):
 
 def main():
     tmp = tempfile.mkdtemp(prefix="webui-test-")
-    # Wie auf dem Geraet: die Oberflaeche liegt unter <root>/web/
+    # As on the device: the UI lives under <root>/web/
     shutil.copytree(WEBFILES, os.path.join(tmp, "web"))
-    alt = webui.ROOT
+    old = webui.ROOT
     webui.ROOT = tmp
     display_config = sys.modules["display_config"]
-    alt_profile = display_config.PROFILES_FILE
+    old_profile = display_config.PROFILES_FILE
     # profiles.json ships with the firmware and is not part of the writable area.
     display_config.PROFILES_FILE = os.path.join(os.path.dirname(HERE), "firmware", "device",
                                                 "profiles.json")
     try:
-        test_seite()
-        test_setup_seite()
-        test_routen()
-        test_dateien(tmp)
-        test_konfiguration(tmp)
+        test_page()
+        test_setup_page()
+        test_routes()
+        test_files(tmp)
+        test_configuration(tmp)
         test_exec()
-        test_httppfad(tmp)
+        test_http_path(tmp)
     finally:
-        webui.ROOT = alt
-        display_config.PROFILES_FILE = alt_profile
+        webui.ROOT = old
+        display_config.PROFILES_FILE = old_profile
         shutil.rmtree(tmp, ignore_errors=True)
     print()
     if FAILURES:
-        print("%d von %d Pruefungen fehlgeschlagen:" % (len(FAILURES), CHECKS[0]))
+        print("%d of %d checks failed:" % (len(FAILURES), CHECKS[0]))
         for name in FAILURES:
             print("   - %s" % name)
         return 1
-    print("alle %d Pruefungen bestanden" % CHECKS[0])
+    print("all %d checks passed" % CHECKS[0])
     return 0
 
 

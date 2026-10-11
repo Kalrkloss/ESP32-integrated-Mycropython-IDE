@@ -14,13 +14,16 @@ DESCRIPTION = "Pick one of the example applications."
 TITEL = TITLE
 BESCHREIBUNG = DESCRIPTION
 
-BG = 0x101820
-CARD = 0x1B2431
-CARD_ACTIVE = 0x24384F
-LINE = 0x2A3648
-FG = 0xE6EEF7
-DIM = 0x8FA0B4
-ACCENT = 0x54A8FF
+BG = 0xEFF3F8
+CARD = 0xFFFFFF
+CARD_ACTIVE = 0xDCE8F5
+LINE = 0xD3DCE6
+FG = 0x16202C
+DIM = 0x5A6B7C
+HEADER = 0x1B5E9C
+HEADER_TEXT = 0xFFFFFF
+HEADER_DIM = 0xC9DEF2
+ACCENT = 0x1B5E9C
 
 
 def _font(size, fallback):
@@ -53,20 +56,20 @@ def start(parent=None):
     header = lv.obj(screen)
     header.set_size(320, 56)
     header.set_pos(0, 0)
-    _style(header, bg=CARD)
+    _style(header, bg=HEADER)
     created.append(header)
 
     title = lv.label(header)
     title.set_text("ESP32-S3 BOARD")
-    title.set_style_text_color(lv.color_hex(FG), 0)
+    title.set_style_text_color(lv.color_hex(HEADER_TEXT), 0)
     font_title = _font(20, 16)
     if font_title is not None:
         title.set_style_text_font(font_title, 0)
     title.align(lv.ALIGN.LEFT_MID, 12, -8)
 
     subtitle = lv.label(header)
-    subtitle.set_text("choose an application -- switch at runtime over /api/app")
-    subtitle.set_style_text_color(lv.color_hex(DIM), 0)
+    subtitle.set_text("choose an application")
+    subtitle.set_style_text_color(lv.color_hex(HEADER_DIM), 0)
     subtitle.align(lv.ALIGN.LEFT_MID, 12, 12)
 
     apps = app_loader.list_apps()

@@ -10,6 +10,7 @@
 # can be tested on a host.
 
 SETUP_MODE = False           # boot.py sets this; main.py branches on it
+STA_RETRY = False            # credentials exist but the join timed out: keep retrying
 AP_IP = "192.168.4.1"
 AP_NETMASK = "255.255.255.0"
 AP_SSID_DEFAULT = "ESP32-Setup"

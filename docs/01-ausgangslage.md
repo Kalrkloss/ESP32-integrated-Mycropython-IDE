@@ -1,105 +1,104 @@
-# Ausgangslage & Machbarkeit
+# Initial Situation & Feasibility
 
-Stand: 2026-10-10
+Status: 2026-10-10
 
-## 1. Was ausgeliefert wird
+## 1. What is delivered
 
-- Firmware-Download: <https://updates.cicciocb.com/> („ANNEX RDS FIRMWARE UPDATES v9",
-  letzte Änderung dort angezeigt: 04.08.2026). Geliefert werden **fertige `.bin`-Dateien**,
-  pro Chip, Variante und Flash-Modus.
-- Web-Installer: <https://flasher.cicciocb.com/>
-- ESP32-S3-Varianten (Auszug aus der Download-Liste): `Annex32-S3_LVGL_HID_OTG_2.99.x_qio_opi.bin`,
+- Firmware download: <https://updates.cicciocb.com/> ("ANNEX RDS FIRMWARE UPDATES v9",
+  last change shown there: 04.08.2026). What is delivered are **ready-made `.bin` files**,
+  per chip, variant and flash mode.
+- Web installer: <https://flasher.cicciocb.com/>
+- ESP32-S3 variants (excerpt from the download list): `Annex32-S3_LVGL_HID_OTG_2.99.x_qio_opi.bin`,
   `Annex32-S3_DMT_LVGL_HID_OTG_ATS_2.99.x_qio_opi.bin`, `Annex32-S3_CAN_USB_DMT_HID_OTG_2.00.92_qio_qspi.bin`.
-- Beispielgröße: die S3-Datei `Annex32-S3_LVGL_HID_OTG_2.99.07_qio_opi.bin` ist
-  **2.871.232 Bytes** (HTTP `content-length`). Das ist ein gemergtes Flash-Image
-  (Bootloader + Partitionstabelle + Applikation).
-- Relevanz für dieses Projekt: Namen wie `USB`, `HID`, `OTG` zeigen, dass im S3-Build
-  **bereits ein USB-Host-Stack** enthalten ist; die Doku führt „USB HID INTERFACE
-  (Mouse, Keyboard, Gamepad) – ESP32-S3 only". Für den Autor ist ein UAC-Host-Treiber
-  damit ein vergleichsweise kleiner Zusatz.
+- Example size: the S3 file `Annex32-S3_LVGL_HID_OTG_2.99.07_qio_opi.bin` is
+  **2,871,232 bytes** (HTTP `content-length`). This is a merged flash image
+  (bootloader + partition table + application).
+- Relevance for this project: names such as `USB`, `HID`, `OTG` show that the S3 build
+  **already contains a USB host stack**; the documentation lists "USB HID INTERFACE
+  (Mouse, Keyboard, Gamepad) – ESP32-S3 only". For the author, a UAC host driver
+  is therefore a comparatively small addition.
 
-## 2. Lizenz-Lage (entscheidend)
+## 2. License situation (decisive)
 
 - FAQ (<https://cicciocb.com/annexwifi/faq.html>):
-  > „Q: If Annex is free, where I can find the source codes?
+  > "Q: If Annex is free, where I can find the source codes?
   >  A: Annex is free, but it is not open source, so the source code is not available."
 - Copyright (<https://cicciocb.com/annexwifi/copyright.html>):
-  > „It is not allowed to reverse engineer, decompile or disassemble the compiled objects
+  > "It is not allowed to reverse engineer, decompile or disassemble the compiled objects
   >  (the .bin and the .exe files) or any attempt to do so."
-- Handbuch (<https://cicciocb.com/annex32help/V2.9912/start.htm>): Copyright 2017–2025
-  Francesco Ceccarella (ciccioCB). Das **Binär-Abbild** darf für nicht-kommerzielle
-  Zwecke weitergegeben werden, der Quellcode ist es nicht.
+- Manual (<https://cicciocb.com/annex32help/V2.9912/start.htm>): Copyright 2017–2025
+  Francesco Ceccarella (ciccioCB). The **binary image** may be redistributed for
+  non-commercial purposes, the source code may not.
 
-Konsequenz: Ein aus dem Binary rekonstruierter Quellcode wäre lizenzwidrig, und seine
-Veröffentlichung wäre eine Urheberrechtsverletzung. Deshalb wurde in diesem Projekt
-**nicht** dekompiliert/disassembliert. Es wurden ausschließlich öffentliche Metadaten
-(HTTP-Header, Download-Liste, Doku) verwendet.
+Consequence: source code reconstructed from the binary would violate the license, and its
+publication would be a copyright infringement. For this reason this project did **not**
+decompile/disassemble. Only public metadata (HTTP headers, download list, docs) were used.
 
-## 3. Frage: Lässt sich mit REA ein compilierbarer Quellcode erzeugen?
+## 3. Question: can REA produce compilable source code?
 
-Werkzeuge auf diesem Host: REA 6.3.0 (`/usr/local/bin/rea`), als Analyse-Provider
-Ghidra 12.1.4 (`/opt/ghidra_12.1.4_PUBLIC`) und Hopper 6.4.2 (`/opt/hopper`).
-Firmware-Regionen-Extraktion setzt Binwalk/Unblob voraus (hier nicht installiert).
+Tools on this host: REA 6.3.0 (`/usr/local/bin/rea`), as analysis providers
+Ghidra 12.1.4 (`/opt/ghidra_12.1.4_PUBLIC`) and Hopper 6.4.2 (`/opt/hopper`).
+Firmware region extraction requires Binwalk/Unblob (not installed here).
 
-Was REA/Ghidra/Hopper als Ergebnis liefern können:
+What REA/Ghidra/Hopper can deliver as a result:
 
-- pro Funktion **Pseudo-C ohne Typen und ohne Namen**, ohne Struktur-/Header-Definitionen,
-- keine Build-Dateien, kein Linker-Skript, keine Memory-Map, kein Partitions-Layout zum Nachbau,
-- **keine** der eingebundenen Bibliotheken im Quelltext (ESP-IDF, FreeRTOS, WLAN-Stack, LVGL,
-  Annex' I2S-Sound-Engine, Web-UI, Dateisystem),
-- keine Kommentare, keine Konfiguration, keine Rebuild-Parameter.
+- per function **pseudo-C without types and without names**, without struct/header definitions,
+- no build files, no linker script, no memory map, no partition layout to reproduce,
+- **none** of the included libraries in source form (ESP-IDF, FreeRTOS, WLAN stack, LVGL,
+  Annex' I2S sound engine, web UI, file system),
+- no comments, no configuration, no rebuild parameters.
 
-Ein Image dieser Größe enthält mehrere tausend Funktionen. Ein daraus entstehendes
-Projekt ist nicht kompilierbar und nicht wartbar; es ist Analysematerial, kein Quelltext.
+An image of this size contains several thousand functions. A project arising from it
+is not compilable and not maintainable; it is analysis material, not source code.
 
-Hinzu kommt der funktionale Teil: Ein USB-Audio-Host-Treiber greift tief in die Firmware ein
-(USB-Host-Library, isochrone Transfers, Ringpuffer, eigene Tasks, Anbindung an die
-Audio-Engine). Solche Eingriffe lassen sich nicht sinnvoll in ein fremdes, symbolfreies
-Binary patchen — jede Version müsste neu gepatcht werden.
+There is also the functional part: a USB audio host driver reaches deep into the firmware
+(USB host library, isochronous transfers, ring buffers, its own tasks, coupling to the
+audio engine). Such interventions cannot sensibly be patched into a foreign, symbol-free
+binary — every version would have to be re-patched.
 
-**Ergebnis: Nein.** Aus dem Annex-Binary lässt sich kein compilierbarer Quellcode
-erzeugen, in den man USB-Sound einbaut. Plausibel wären lediglich *kleine* Erkenntnisse
-über einzelne Funktionen (Analyse-Zwecke), nicht ein erweiterbares Projekt.
+**Result: No.** No compilable source code can be produced from the Annex binary
+into which one could build USB sound. At most *small* insights
+about individual functions would be plausible (analysis purposes), not an extensible project.
 
-## 4. Optionen, die tatsächlich funktionieren
+## 4. Options that actually work
 
-### 4.1 Beim Autor anfragen (kleinster Aufwand)
+### 4.1 Ask the author (smallest effort)
 
-USB-Host-Stack und OTG sind im S3-Build bereits vorhanden (siehe Abschnitt 1).
-Ein UAC-Host-Treiber auf Basis von `espressif/usb_host_uac` wäre für cicciocb eine
-überschaubare Erweiterung. Forum: <https://cicciocb.com/forum> — dort gibt es bereits
-den Präzedenzfall „USB HID" (S3-only), samt Doku-Eintrag.
+USB host stack and OTG are already present in the S3 build (see section 1).
+A UAC host driver based on `espressif/usb_host_uac` would be a
+manageable extension for cicciocb. Forum: <https://cicciocb.com/forum> — there is already
+the precedent "USB HID" (S3-only), including a documentation entry.
 
-### 4.2 Eigenes ESP-IDF-Projekt (dieses Repository)
+### 4.2 Own ESP-IDF project (this repository)
 
-Bausteine, offiziell von Espressif bzw. aus der Community:
+Building blocks, officially from Espressif or from the community:
 
-| Zweck | Baustein | Quelle |
+| Purpose | Building block | Source |
 |---|---|---|
-| USB-Host, Audio-Klasse 1.0 (Lautsprecher + Mikrofon, Vol/Mute) | `espressif/usb_host_uac` | <https://components.espressif.com/components/espressif/usb_host_uac> |
-| USB-Host UVC+UAC-Streams (Ringpuffer, Suspend/Resume) | `usb_stream` (esp-iot-solution) | <https://docs.espressif.com/projects/esp-iot-solution/en/latest/usb/usb_host/usb_stream.html> |
-| USB-Host, Audio-Klasse 2.0 (ESP32-S3) | `esp-uac2-host` | vorgestellt unter <https://blog.adafruit.com/2026/04/06/a-usb-audio-class-2-0-host-driver-for-esp32-s3/> |
-| Gegenrichtung: S3 *ist* die Soundkarte am PC (UAC-Device, TinyUSB) | `esp_device_uac` | <https://docs.espressif.com/projects/esp-iot-solution/en/latest/usb/usb_device/usb_device_uac.html> |
-| Gegenrichtung, Arduino-Basis | arduino-audio-tools (UAC2) | <https://www.pschatzmann.ch/home/2026/06/22/usb-audio-class-2-0-for-arduino/> |
+| USB host, Audio Class 1.0 (speaker + microphone, vol/mute) | `espressif/usb_host_uac` | <https://components.espressif.com/components/espressif/usb_host_uac> |
+| USB host UVC+UAC streams (ring buffer, suspend/resume) | `usb_stream` (esp-iot-solution) | <https://docs.espressif.com/projects/esp-iot-solution/en/latest/usb/usb_host/usb_stream.html> |
+| USB host, Audio Class 2.0 (ESP32-S3) | `esp-uac2-host` | presented at <https://blog.adafruit.com/2026/04/06/a-usb-audio-class-2-0-host-driver-for-esp32-s3/> |
+| Opposite direction: S3 *is* the sound card on the PC (UAC device, TinyUSB) | `esp_device_uac` | <https://docs.espressif.com/projects/esp-iot-solution/en/latest/usb/usb_device/usb_device_uac.html> |
+| Opposite direction, Arduino-based | arduino-audio-tools (UAC2) | <https://www.pschatzmann.ch/home/2026/06/22/usb-audio-class-2-0-for-arduino/> |
 
-Grenzen der Hardware (ESP32-S3): USB-OTG ist **Full-Speed (12 Mbit/s)** und Host und
-Gerät teilen sich denselben Port — brauchbare Audioqualität heißt hier 1 Kanal
-Mikrofon + 1 Kanal Lautsprecher, 44,1/48 kHz, 16 Bit.
+Hardware limits (ESP32-S3): USB-OTG is **full speed (12 Mbit/s)** and host and
+device share the same port — usable audio quality here means 1 channel
+microphone + 1 channel speaker, 44.1/48 kHz, 16 bit.
 
-### 4.3 BASIC-Basis (Open Source) für das eigene Projekt
+### 4.3 BASIC base (open source) for the own project
 
-| Projekt | Lizenz | Eignung |
+| Project | License | Suitability |
 |---|---|---|
-| [paladin-t/my_basic](https://github.com/paladin-t/my_basic) | MIT | 2 C-Dateien, < 128 KB, ausdrücklich zum Einbetten/Erweitern gedacht — kleinster Weg zu `SOUND.USB.*` |
-| [slviajero/tinybasic](https://github.com/slviajero/tinybasic) | BSD-3 | sehr breite Plattform-Abstraktion, ESP32 bereits unterstützt |
-| [legio-e/BasicPlus](https://github.com/legio-e/BasicPlus) | MIT | Bytecode-VM mit Debugger, ESP32-S3/P4-Firmware vorhanden |
+| [paladin-t/my_basic](https://github.com/paladin-t/my_basic) | MIT | 2 C files, < 128 KB, expressly intended for embedding/extending — smallest path to `SOUND.USB.*` |
+| [slviajero/tinybasic](https://github.com/slviajero/tinybasic) | BSD-3 | very broad platform abstraction, ESP32 already supported |
+| [legio-e/BasicPlus](https://github.com/legio-e/BasicPlus) | MIT | bytecode VM with debugger, ESP32-S3/P4 firmware available |
 
-Nicht geeignet: **Basic32** (Ferrazzi) — ebenfalls Closed Source, nur Binaries
+Not suitable: **Basic32** (Ferrazzi) — likewise closed source, only binaries
 (<https://github.com/Ferrazzi/Basic32>).
 
-## 5. Offen / nicht geprüft
+## 5. Open / not examined
 
-- Ob cicciocb USB-Audio bereits plant oder ablehnt (nicht recherchiert).
-- Ob Annexe eine Erweiterungsschnittstelle für nativen Code hat. Aus Handbuch und
-  Downloadliste ergibt sich keine; die dokumentierten Kommandos sind eingebaut.
-- Ob real eine UAC-1.0- oder UAC-2.0-Soundkarte vorliegt (hängt vom Testgerät ab).
+- Whether cicciocb already plans or rejects USB audio (not researched).
+- Whether Annex has an extension interface for native code. No such interface emerges from the
+  manual and download list; the documented commands are built in.
+- Whether in reality a UAC 1.0 or UAC 2.0 sound card is present (depends on the test device).
