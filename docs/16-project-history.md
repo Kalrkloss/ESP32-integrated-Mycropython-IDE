@@ -8,7 +8,8 @@ abandoned** instead of re-litigating them. `git log` carries the details per cha
 1. **Analysis of the original goal.** Add USB audio (UAC) to the proprietary Annex RDS
    BASIC firmware, so BASIC programs could use a USB sound card. Result: impossible from
    the outside - no source, the licence forbids reverse engineering, and a symbol-free
-   image cannot be rebuilt. Insights in [`docs/01-ausgangslage.md`-`05-feature-request-cicciocb.md`](01-ausgangslage.md).
+   image cannot be rebuilt. Insights in the analysis documents 01-05, starting with
+   [`docs/01-ausgangslage.md`](01-ausgangslage.md).
 2. **Route decision.** Own ESP-IDF firmware with a BASIC core (route B) versus own
    MicroPython + LVGL firmware (route C). Route C was favoured after the effort estimate
    ([`docs/06-micropython-route.md`](06-micropython-route.md)) - mainly because the web UI, the REPL and the display stack come almost for
