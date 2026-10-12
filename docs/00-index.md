@@ -10,7 +10,6 @@ work and the lessons learned. This index only says what each document contains.
 | [`07-configuration-and-portal.md`](07-configuration-and-portal.md) | Board profiles, data driven display/touch configuration, drivers loaded at runtime, setup access point with captive portal, the setup page, verification and pitfalls |
 | [`08-apps.md`](08-apps.md) | The example applications, their contract, the loader, how to choose and switch applications, how to deploy and verify them |
 | [`09-lessons-learned.md`](09-lessons-learned.md) | Every rule that cost time, with the symptom, the cause and the measurement - read this before debugging |
-| [`16-project-history.md`](16-project-history.md) | The chronological record, the decisions, and the ones that were reversed (so they are not re-opened) |
 | [`06-lvgl-remote-control.md`](06-lvgl-remote-control.md) | Study: showing and operating the LVGL UI live in the browser (transport comparison, measured throughput, pointer injection, staged plan P0-P2) |
 | [`05-web-ui.md`](05-web-ui.md) | The web UI: console, CodeMirror editor, file manager, configuration; chunked delivery, screenshot path |
 | [`04-touch-bringup.md`](04-touch-bringup.md) | Why the touch was dead and what fixed it (LVGL tick, input-priority trap, GPIO 8 collision, idle byte patterns) |
