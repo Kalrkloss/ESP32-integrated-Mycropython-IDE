@@ -7,8 +7,8 @@
 #   /drv/indev/<name>.py
 #
 # Our own patched files win over the upstream ones: the AXS15231B driver and the
-# AXS15231 touch driver carry the fixes from docs/09-display-bringup.md and
-# docs/10-touch-bringup.md.
+# AXS15231 touch driver carry the fixes from docs/03-display-bringup.md and
+# docs/04-touch-bringup.md.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"

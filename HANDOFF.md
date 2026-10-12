@@ -19,10 +19,10 @@ one chip only, so the board list is filtered by `os.uname().machine`.
 
 | Area | Evidence |
 |------|----------|
-| Display (QSPI, full-frame refresh) | `docs/09-display-bringup.md`; colour bands read back, panel visible |
-| Touch | `docs/10-touch-bringup.md`; 262 points / 300 s, ~28 Hz, UI counter increments |
-| Debug server + MCP tools | `docs/08-mcp-debug-server.md`; MCP registered in Hermes as `esp32` (9 tools) |
-| Web UI | `docs/11-weboberflaeche.md`; console, editor save, file listing, configuration round-trip |
+| Display (QSPI, full-frame refresh) | `docs/03-display-bringup.md`; colour bands read back, panel visible |
+| Touch | `docs/04-touch-bringup.md`; 262 points / 300 s, ~28 Hz, UI counter increments |
+| Debug server + MCP tools | `docs/02-mcp-debug-server.md`; MCP registered in Hermes as `esp32` (9 tools) |
+| Web UI | `docs/05-web-ui.md`; console, editor save, file listing, configuration round-trip |
 | Data driven display/touch config | `/api/config` returns `board JC3248W535`, `driver axs15231b`; display initialised from `/drv/display/axs15231b` |
 | Board profiles + chip filter | `/api/profiles` -> 4 profiles, all `chip: esp32s3` |
 | Drivers at runtime | `/api/drivers` -> `{"display": ["axs15231b"], "touch": ["axs15231"]}` |
@@ -59,7 +59,7 @@ one chip only, so the board list is filtered by `os.uname().machine`.
    mpremote). Then check `/api/drivers` and the setup page's drop-downs.
 3. **Verify the apps by hand** (see above). Fix what feels wrong - a game that cannot be
    played is not finished, no matter what the framebuffer says.
-4. **Browser remote control of the LVGL UI** (`docs/12-lvgl-fernbedienung.md`). The plan
+4. **Browser remote control of the LVGL UI** (`docs/06-lvgl-remote-control.md`). The plan
    is written and measured: P0 = poll `/screen.raw?scale=1` at ~2 fps (0.457 s/frame,
    ~2.2 fps), P1 = a second pointer `lv.indev` fed from a lock-protected queue
    (`mcp_pointer.py` + one line in `main.py`), P2 = delta rectangles from the LVGL flush
@@ -74,10 +74,6 @@ one chip only, so the board list is filtered by `os.uname().machine`.
 7. **A second board profile on hardware.** Add pins to `profiles.json` and verify; the
    failure mode is a black panel, and setup mode stays reachable because the access point
    comes up first.
-
-**Parked, do not resume:** USB audio (UAC) and the BASIC route, documents 01-06. The
-board has I2S audio; the closed-source Annex firmware cannot be rebuilt (see
-`docs/01-ausgangslage.md`).
 
 ## 3. Environment and hardware access
 
@@ -134,7 +130,7 @@ Helper tools that save time:
 6. **Drive the thing**: `tools/apps_smoke.py` for the applications, `POST /api/app` for
    switching, `tools/camlook.py` when a human should judge the picture.
 
-## 6. Lessons learned (short version; details in `docs/15-lessons-learned.md`)
+## 6. Lessons learned (short version; details in `docs/09-lessons-learned.md`)
 
 1. **LVGL needs a fed tick.** Without `lv.tick_inc()` per loop iteration, `lv.tick_get()`
    stays 0 and `lv.timer_handler()` runs *no* timer: no touch polling, no refresh. This
@@ -178,7 +174,6 @@ Helper tools that save time:
 
 ## 7. Git history
 
-Commit messages carry the reasoning per change; read them with `git log` (the older ones
-predate the switch to English and are titled in German). The build-up is roughly: port
-and board access -> debug server -> display bring-up -> touch bring-up -> web UI ->
-configuration/profiles/portal -> example applications -> visible boot and language sweep.
+Commit messages carry the reasoning per change - read them with `git log` when you want
+to know why something looks the way it does (the older ones are titled in German, before
+the switch to English).

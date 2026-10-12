@@ -3,7 +3,7 @@
 #
 # Verwendet den Fork-Branch straga/lvgl_micropython -> feature/spi_bus_fast:
 # nur dieser bringt lcd_bus.SPIBusFast (DMA + gestueckelte Transfers), ohne den
-# dieses QSPI-Panel am Buslimit (32768 Byte) scheitert. Siehe docs/09-display-bringup.md.
+# dieses QSPI-Panel am Buslimit (32768 Byte) scheitert. Siehe docs/03-display-bringup.md.
 set -euo pipefail
 
 SRC="${FORK_SRC:-/opt/lvgl_mp_fork}"

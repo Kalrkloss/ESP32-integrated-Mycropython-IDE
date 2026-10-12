@@ -108,6 +108,6 @@ Panel + UI + debug server come up this way on cold start (`main.py`).
   can't convert module to int`). So **reset** before every device script.
 - **native USB**: after a reset `/dev/…ttyACM*` briefly disappears; wait actively
   before accesses (do not blindly `sleep`).
-- **by-id changes with the firmware**: factory/Annex report
-  `USB JTAG/serial debug unit`, MicroPython `Espressif Device`. Therefore the port
+- **by-id changes with the firmware**: the factory image reports
+  `USB JTAG/serial debug unit`, MicroPython reports `Espressif Device`. Therefore the port
   is determined via the USB path (`…-usb-0:4.4.3:1.0`), with by-id as fallback.

@@ -1,29 +1,22 @@
 # ESP32-S3 MicroPython + LVGL firmware with an on-device debug server
 
-Firmware for the **Guition JC3248W535** (ESP32-S3, 3.5" QSPI panel, capacitive touch)
-that an agent can debug **by itself**: a debug server runs on the board, and the board
+Firmware for the **Guition JC3248W535** (ESP32-S3, 3.5" QSPI panel, capacitive touch),
+a C/C++ firmware image (ESP-IDF, LVGL, panel drivers) with a MicroPython application layer
+on top. It is built so that an agent can debug it **by itself**: a debug server runs on the
+board, and the board
 also serves a web UI (REPL, code editor, file manager, configuration), a setup access
 point with a captive portal for first-time configuration, and a set of example
 applications (snake, minesweeper, sokoban, calculator, clock with stopwatch and alarm,
 2048, tic-tac-toe) behind a launcher.
 
-Everything here is our own code, MIT licensed (see [LICENSE](LICENSE)); no code or
-artefacts from Annex RDS.
-
-## What this repository is not
-
-It started as an attempt to add USB audio (UAC) to the closed-source **Annex RDS** BASIC
-firmware. That path was abandoned: Annex is not open source, its licence forbids reverse
-engineering, and this board has I2S audio anyway. BASIC is dropped, USB audio is parked.
-Documents 01-06 record that investigation - read them as history, do not resume that
-route.
+Everything here is our own code, MIT licensed (see [LICENSE](LICENSE)).
 
 ## Hardware
 
 | | |
 |---|---|
 | Board | Guition JC3248W535, ESP32-S3 N16R8, 3.5" 320x480 QSPI panel, capacitive touch |
-| Firmware | MicroPython 1.27 + LVGL 9, built with `lvgl_micropython` (mainline + `SPIBusFast`) |
+| Firmware | C/C++ image: MicroPython 1.27 + LVGL 9, built with `lvgl_micropython` (mainline + `SPIBusFast`) |
 | Board in the reference setup | `http://192.168.1.168/` |
 | Debug server | `http://192.168.1.168/mcp` (MCP over HTTP) and `/status` (plain text) |
 | Web UI | console, CodeMirror editor, file manager, configuration |

@@ -5,7 +5,7 @@
       "short": "JC3248W535",
       "name": "JC3248W535 (Guition, 3.5 inch, ESP32-S3 N16R8)",
       "chip": "esp32s3",
-      "source": "measured on this device: docs/09-display-bringup.md, docs/10-touch-bringup.md",
+      "source": "measured on this device: docs/03-display-bringup.md, docs/04-touch-bringup.md",
       "display": {
         "driver": "axs15231b",
         "bus": "qspi",

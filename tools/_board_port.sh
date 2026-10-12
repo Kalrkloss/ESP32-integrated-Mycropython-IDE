@@ -2,7 +2,7 @@
 # Debug-Boards -- NIE den Zigbee-Stick.
 #
 # Warum nicht einfach /dev/ttyACM1?
-#   * Die by-id-Namen aendern sich mit der laufenden Firmware (Annex/Factory:
+#   * Die by-id-Namen aendern sich mit der laufenden Firmware (Werksimage:
 #     "USB JTAG/serial debug unit", MicroPython: "Espressif Device").
 #   * /dev/ttyACM* wird in Reihenfolge der Erkennung vergeben -- nicht stabil.
 # Deshalb: primaer der USB-Pfad (Dock-Port), sonst by-id mit Zigbee-Ausschluss.

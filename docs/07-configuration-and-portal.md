@@ -11,9 +11,9 @@ A new board starts with no WiFi credentials. Without a fallback it is only reach
 over the serial console, so the first configuration would need a laptop with
 mpremote and the right port -- the exact situation this project exists to avoid.
 
-Annex-style behaviour was the model asked for: show a selection of known boards,
-let the user pick one, then let them adjust display driver, touch driver and pin
-assignment. Two constraints shaped the result:
+The requirement was: show a selection of known boards, let the user pick one, then let
+them adjust display driver, touch driver and pin assignment. Two constraints shaped the
+result:
 
 * **One chip per firmware image.** A MicroPython build is compiled for exactly one
   ESP32 type, so a board offering other chips would be lying. The profile list is
