@@ -21,6 +21,11 @@ keep the memory footprint small enough for the ESP32-S3.
 
 ## Contract
 
+Look and feel comes from `_ui.py` in the same directory: colour, spacing and type tokens
+plus the shared `screen()`, `header()`, `card()`, `button()` and `tap()` builders. It starts
+with `_`, so the loader does not list it as an application. Applications do not carry their
+own palette or hand-styled buttons -- see `10-lvgl-design.md`.
+
 An application is one Python file in `/apps` (repo: `firmware/apps/`) that provides:
 
 ```python

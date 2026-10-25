@@ -24,7 +24,7 @@ FAILURES = []
 CHECKS = [0]
 
 # Modules an application may use: LVGL plus MicroPython/CPython standard library.
-ALLOWED_IMPORTS = {"lvgl", "app_loader", "time", "math", "random", "os", "sys", "gc",
+ALLOWED_IMPORTS = {"lvgl", "app_loader", "_ui", "time", "math", "random", "os", "sys", "gc",
                    "json", "micropython", "display_config"}
 
 
@@ -38,7 +38,9 @@ def check(name, condition, detail=""):
 
 
 def sources():
-    return sorted(name for name in os.listdir(APPS) if name.endswith(".py"))
+    """Application files: everything in apps/ except shared modules (_ui.py)."""
+    return sorted(name for name in os.listdir(APPS)
+                  if name.endswith(".py") and not name.startswith("_"))
 
 
 def test_apps():
@@ -182,6 +184,34 @@ def _raises(function, argument):
     return False
 
 
+def test_ui():
+    print("Design tokens (_ui)")
+    path = os.path.join(APPS, "_ui.py")
+    check("_ui.py exists", os.path.isfile(path))
+    if not os.path.isfile(path):
+        return
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    for token in ("BG", "SURFACE", "LINE", "TEXT", "DIM", "ACCENT", "ACCENT_PRESSED",
+                  "ACCENT_TEXT", "OK", "WARN", "DANGER", "S1", "S4", "R_MD", "TOUCH_MIN"):
+        check("_ui defines %s" % token, token in text)
+    for builder in ("def screen", "def header", "def card", "def button", "def tap",
+                    "def font", "def set_enabled", "def set_checked"):
+        check("_ui has %s" % builder.replace("def ", ""), builder in text)
+    check("_ui is not listed as an application", "_ui.py" not in sources())
+    check("touch targets are at least 44 px",
+          re.search(r"TOUCH_MIN\s*=\s*(\d+)", text) is not None
+          and int(re.search(r"TOUCH_MIN\s*=\s*(\d+)", text).group(1)) >= 44)
+
+    # Applications get colour through tokens. This is reported, not enforced, until
+    # every example has been migrated -- the count going down is the progress bar.
+    raw = [name for name in sources()
+           if re.search(r"color_hex\(\s*0x", open(os.path.join(APPS, name),
+                                                  encoding="utf-8").read())]
+    print("  note %d of %d applications still hardcode colours%s"
+          % (len(raw), len(sources()), (": " + ", ".join(raw)) if raw else ""))
+
+
 def test_repo_state():
     print("Repository state")
     check("apps directory exists", os.path.isdir(APPS))
@@ -207,6 +237,7 @@ def main():
     try:
         test_apps()
         test_launcher()
+        test_ui()
         test_loader(tmp)
         test_repo_state()
     finally:

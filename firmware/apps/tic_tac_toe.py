@@ -7,65 +7,28 @@
 # Single player against a small unbeatable-ish computer: it wins if it can, blocks
 # if it must, otherwise takes the centre or a random corner.
 #
-# Rules kept: only lvgl + stdlib, full cleanup in stop(), touch targets >= 40x40 px.
+# Look and feel comes from _ui (tokens + widgets); this file only composes.
 
 import random
 
 import lvgl as lv
+
+import _ui as ui
 
 TITLE = "Tic-Tac-Toe"
 DESCRIPTION = "You are X. Beat the computer, or take a draw."
 TITEL = TITLE
 BESCHREIBUNG = DESCRIPTION
 
-CELL = 90          # 3 x 3 -> 270 x 270 pixels, touch targets far over 40
-BG = 0x101820
-GRID = 0x2C3646
-X = 0x30A0E0
-O = 0xE0A030
-TEXT = 0xFFFFFF
-ACCENT = 0x3A6EA5
+CELL = 88
+GAP = 8
+GRID = 3 * CELL + 2 * GAP          # 280 px
+BOARD_X = (320 - GRID) // 2
+BOARD_Y = ui.HEADER_H + ui.S5
 
 LINES = [(0, 1, 2), (3, 4, 5), (6, 7, 8),
          (0, 3, 6), (1, 4, 7), (2, 5, 8),
          (0, 4, 8), (2, 4, 6)]
-
-
-def _font(size):
-    f = getattr(lv, "font_montserrat_%d" % size, None)
-    if f is None:
-        f = lv.font_montserrat_16
-    return f
-
-
-def _zero_pad(obj):
-    for name in ("set_style_pad_all", "set_style_pad_row", "set_style_pad_column"):
-        fn = getattr(obj, name, None)
-        if fn is not None:
-            try:
-                fn(0, 0)
-            except Exception:  # noqa: BLE001
-                pass
-
-
-def _rect(parent, x, y, w, h, color, radius=0):
-    obj = lv.obj(parent)
-    obj.set_pos(x, y)
-    obj.set_size(w, h)
-    obj.set_style_bg_color(lv.color_hex(color), 0)
-    obj.set_style_radius(radius, 0)
-    obj.set_style_border_width(0, 0)
-    _zero_pad(obj)
-    return obj
-
-
-def _label(parent, text, x, y, color, size=16):
-    lab = lv.label(parent)
-    lab.set_text(text)
-    lab.set_style_text_color(lv.color_hex(color), 0)
-    lab.set_style_text_font(_font(size), 0)
-    lab.set_pos(x, y)
-    return lab
 
 
 class _TicTacToe:
@@ -76,84 +39,83 @@ class _TicTacToe:
         self._build()
 
     def _build(self):
-        self.root_ = lv.obj(self.parent)
-        self.root_.set_pos(0, 0)
-        self.root_.set_size(320, 480)
-        self.root_.set_style_bg_color(lv.color_hex(BG), 0)
-        self.root_.set_style_border_width(0, 0)
-        _zero_pad(self.root_)
+        self.root_ = ui.screen(self.parent)
+        self.header = ui.header(self.root_, TITLE, "Your turn (X)")
 
-        self.status = _label(self.root_, "Your turn (X)", 10, 8, TEXT, 18)
+        board = ui.box(self.root_, BOARD_X, BOARD_Y, GRID, GRID)
+        board.set_style_pad_all(0, 0)
 
-        grid = _rect(self.root_, 20, 60, 3 * CELL, 3 * CELL, GRID)
-        grid.remove_flag(lv.obj.FLAG.SCROLLABLE)
         self.cells = []
         for i in range(9):
-            r, c = divmod(i, 3)
-            cell = _rect(grid, c * CELL, r * CELL, CELL - 2, CELL - 2, BG)
-            cell.add_flag(lv.obj.FLAG.CLICKABLE)
-            lab = _label(cell, "", 0, 0, TEXT, 48)
-            lab.center()
-            cell.add_event_cb(lambda _e, i=i: self._tap(i), lv.EVENT.CLICKED, None)
-            self.cells.append((cell, lab))
+            row, column = divmod(i, 3)
+            cell = ui.card(board, column * (CELL + GAP), row * (CELL + GAP), CELL, CELL,
+                           bg=ui.SURFACE_ALT, radius=ui.R_MD, border=ui.GRID_LINE)
+            mark = ui.label(cell, "", 0, 0, size=48, color=ui.MARK_X, align=lv.ALIGN.CENTER)
+            ui.tap(cell, lambda index=i: self._tap(index), extra=0)
+            self.cells.append((cell, mark))
 
-        self.new_btn = _rect(self.root_, 95, 360, 130, 56, ACCENT, radius=8)
-        self.new_btn.add_flag(lv.obj.FLAG.CLICKABLE)
-        nlab = _label(self.new_btn, "New game", 0, 0, TEXT, 18)
-        nlab.center()
-        self.new_btn.add_event_cb(lambda _e: self._reset(), lv.EVENT.CLICKED, None)
+        self.new_btn = ui.button(self.root_, "New game", (320 - 160) // 2, 400,
+                                 width=160, kind="ghost", callback=self._reset)
 
-    def _tap(self, i):
-        if self.done or self.board[i]:
+    # ------------------------------------------------------------------ game logic
+    def _tap(self, index):
+        if self.done or self.board[index]:
             return
-        self._place(i, "X")
+        self._place(index, "X")
         if self._finished():
             return
         self._ai_move()
         self._finished()
 
-    def _place(self, i, mark):
-        self.board[i] = mark
-        cell, lab = self.cells[i]
-        lab.set_text(mark)
-        lab.set_style_text_color(lv.color_hex(X if mark == "X" else O), 0)
-        lab.center()
+    def _place(self, index, mark):
+        self.board[index] = mark
+        cell, label = self.cells[index]
+        label.set_text(mark)
+        label.set_style_text_color(
+            lv.color_hex(ui.MARK_X if mark == "X" else ui.MARK_O), 0)
 
     def _winner(self):
         for a, b, c in LINES:
             if self.board[a] and self.board[a] == self.board[b] == self.board[c]:
-                return self.board[a]
+                return self.board[a], (a, b, c)
         if all(self.board):
-            return "draw"
-        return None
+            return "draw", ()
+        return None, ()
 
     def _finished(self):
-        result = self._winner()
+        result, line = self._winner()
         if result is None:
             return False
         self.done = True
         if result == "draw":
-            self.status.set_text("Draw")
+            self._status("Draw", ui.WARN)
         elif result == "X":
-            self.status.set_text("You win!")
+            self._status("You win", ui.OK)
         else:
-            self.status.set_text("Computer wins")
+            self._status("Computer wins", ui.DANGER)
+        for index in line:
+            cell = self.cells[index][0]
+            cell.set_style_bg_color(lv.color_hex(ui.ACCENT_SOFT), 0)
+            cell.set_style_border_color(lv.color_hex(ui.ACCENT), 0)
         return True
+
+    def _status(self, text, color):
+        if self.header.subtitle is not None:
+            self.header.subtitle.set_text(text)
+            self.header.subtitle.set_style_text_color(lv.color_hex(color), 0)
 
     def _free(self):
         return [i for i in range(9) if not self.board[i]]
 
     def _ai_move(self):
-        # Win if possible.
-        for mark in ("O", "X"):
-            for i in self._free():
-                self.board[i] = mark
-                won = self._winner() == mark
-                self.board[i] = ""
+        for mark in ("O", "X"):                      # win, then block
+            for index in self._free():
+                self.board[index] = mark
+                won = self._winner()[0] == mark
+                self.board[index] = ""
                 if won:
-                    self._place(i, "O")
+                    self._place(index, "O")
                     return
-        # Otherwise centre, then a random free cell.
         if not self.board[4]:
             self._place(4, "O")
             return
@@ -164,10 +126,11 @@ class _TicTacToe:
     def _reset(self):
         self.board = [""] * 9
         self.done = False
-        self.status.set_text("Your turn (X)")
-        for _cell, lab in self.cells:
-            lab.set_text("")
-            lab.center()
+        self._status("Your turn (X)", ui.DIM)
+        for cell, label in self.cells:
+            label.set_text("")
+            cell.set_style_bg_color(lv.color_hex(ui.SURFACE_ALT), 0)
+            cell.set_style_border_color(lv.color_hex(ui.GRID_LINE), 0)
 
     # ------------------------------------------------------------- lifecycle
     def stop(self):

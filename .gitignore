@@ -12,3 +12,4 @@ firmware/device/wifi.json
 __pycache__/
 *.pyc
 config.json
+tools/preview/out/
