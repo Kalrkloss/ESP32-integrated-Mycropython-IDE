@@ -63,7 +63,7 @@ def start(parent=None):
         for entry in apps:
             created.append(_app_row(listed, entry))
 
-    ui.footer(screen, "running: %s" % (app_loader.running_app() or "-"))
+    ui.footer(screen, "running: %s" % (app_loader.running_app() or "launcher"))
 
     return _Handle(created)
 

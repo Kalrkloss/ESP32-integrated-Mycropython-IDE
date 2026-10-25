@@ -202,8 +202,12 @@ def capture(scale=1):
     return data, width, height, swap
 
 
-def attach_framebuffer(which=1):
+def attach_framebuffer(which=2):
     """Register the display's framebuffer -- capture without an LVGL snapshot.
+
+    `which=2` by default: on the JC3248W535 the display flips between two buffers and
+    buffer 1 still holds the boot splash, so reading it returns a white frame while the
+    panel shows the application.
 
     A snapshot costs 3 to 20 s on this board depending on the scale (LVGL snapshot
     plus PNG encoding in pure Python; at scale 2 it even runs into the timeout).
