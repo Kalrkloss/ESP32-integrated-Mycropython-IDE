@@ -6,6 +6,9 @@
 #
 #   bash tools/build_firmware.sh
 #
+# The 4 MB application partition is not cosmetic: with the design font set enabled the
+# default partition left 3.9 KB free, so the next font or driver would have failed the link.
+#
 # Output: /opt/lvgl_micropython/build/lvgl_micropy_ESP32_GENERIC_S3-SPIRAM_OCT-16.bin
 # Flashing needs the board on USB (docs/01-board-jc3248w535.md); this script only builds.
 set -e
@@ -18,6 +21,7 @@ source /opt/esp-idf/export.sh > /dev/null 2>&1 || { echo "no ESP-IDF at /opt/esp
 cd "$TREE"
 env -u PYTHONPATH python3 make.py esp32 \
   BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
-  --flash-size=16 DISPLAY=axs15231b INDEV=axs15231 --ota
+  --flash-size=16 DISPLAY=axs15231b INDEV=axs15231 --ota \
+  --partition-size=4194304
 
 ls -la "$TREE"/build/*.bin
