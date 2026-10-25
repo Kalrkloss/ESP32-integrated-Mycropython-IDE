@@ -5,14 +5,19 @@
 #   start(parent=None)       builds the UI, returns a handle with .stop()
 #
 # Movement is via four arrow buttons (a swipe would need gesture handling the
-# binding does not expose comfortably). Each tile shows its value; the colour
-# steps up with the value.
+# binding does not expose comfortably). Each tile shows its value; the surface
+# steps from the raised card colour to the accent as the value grows.
 #
-# Rules kept: only lvgl + stdlib, full cleanup in stop(), touch targets >= 40x40 px.
+# Rules kept: only lvgl + stdlib, full cleanup in stop().
+#
+# Look and feel comes from _ui (tokens + widgets); this file only composes. The
+# tile ramp is derived from tokens, so no palette of hex literals lives here.
 
 import random
 
 import lvgl as lv
+
+import _ui as ui
 
 TITLE = "2048"
 DESCRIPTION = "Slide and merge tiles with the arrow buttons. Reach 2048."
@@ -20,55 +25,54 @@ TITEL = TITLE
 BESCHREIBUNG = DESCRIPTION
 
 N = 4
-CELL = 64          # 4 x 4 -> 256 + gaps, touch targets far over 40
-GAP = 8
-BG = 0x101820
-BOARD = 0x1E2833
-TEXT = 0xFFFFFF
-ACCENT = 0x3A6EA5
+BOARD = 288
+BOARD_X = (320 - BOARD) // 2
+BOARD_Y = ui.HEADER_H + ui.S2
+PAD = ui.S2                     # breathing room inside the board frame
+GAP = ui.S2                     # gap between two slots, from the S scale
+CELL = (BOARD - 2 * PAD - (N - 1) * GAP) // N
 
-TILE_COLORS = {
-    2: 0x3A6EA5, 4: 0x2F9E8F, 8: 0x30A0E0, 16: 0xE0A030, 32: 0xE06060,
-    64: 0xE04040, 128: 0xC08030, 256: 0xB060C0, 512: 0x9060E0, 1024: 0x40C060,
-    2048: 0xE0C030,
-}
-
-
-def _font(size):
-    f = getattr(lv, "font_montserrat_%d" % size, None)
-    if f is None:
-        f = lv.font_montserrat_16
-    return f
+ARROW_W = 56
+ARROW_GAP = ui.S2
+SIDE_W = 96
+SIDE_X = 320 - ui.S4 - SIDE_W
+PAD_Y = BOARD_Y + BOARD + ui.S3
+PAD_H = 2 * ui.TOUCH_MIN + ui.S2
+PAD_ROW2 = PAD_Y + ui.TOUCH_MIN + ui.S2
 
 
-def _zero_pad(obj):
-    for name in ("set_style_pad_all", "set_style_pad_row", "set_style_pad_column"):
-        fn = getattr(obj, name, None)
-        if fn is not None:
-            try:
-                fn(0, 0)
-            except Exception:  # noqa: BLE001
-                pass
+def _mix(low, high, percent):
+    """Blend two token colours: percent 0 -> low, 100 -> high. Integer channel math."""
+    def channel(shift):
+        a = (low >> shift) & 0xFF
+        b = (high >> shift) & 0xFF
+        return (a * (100 - percent) + b * percent) // 100
+    return (channel(16) << 16) | (channel(8) << 8) | channel(0)
 
 
-def _rect(parent, x, y, w, h, color, radius=0):
-    obj = lv.obj(parent)
-    obj.set_pos(x, y)
-    obj.set_size(w, h)
-    obj.set_style_bg_color(lv.color_hex(color), 0)
-    obj.set_style_radius(radius, 0)
-    obj.set_style_border_width(0, 0)
-    _zero_pad(obj)
-    return obj
+# Exponent 2 -> step 0, exponent 2048 -> last step. Every shade is computed from
+# SURFACE_ALT and ACCENT, so the whole ramp moves when the tokens move.
+TILE_STEPS = (0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100)
+TILE_SHADES = tuple(_mix(ui.SURFACE_ALT, ui.ACCENT, step) for step in TILE_STEPS)
 
 
-def _label(parent, text, x, y, color, size=16):
-    lab = lv.label(parent)
-    lab.set_text(text)
-    lab.set_style_text_color(lv.color_hex(color), 0)
-    lab.set_style_text_font(_font(size), 0)
-    lab.set_pos(x, y)
-    return lab
+def _tile_shade(value):
+    """Step along the ramp by powers of two; capped at the last shade."""
+    index = 0
+    step = 2
+    while step < value and index + 1 < len(TILE_SHADES):
+        step *= 2
+        index += 1
+    return TILE_SHADES[index]
+
+
+def _digit_size(value):
+    """Four digits at 28 px would fill the whole 62 px slot, so the type steps down."""
+    if value >= 1000:
+        return 20
+    if value >= 100:
+        return 24
+    return 28
 
 
 class _Game2048:
@@ -84,38 +88,34 @@ class _Game2048:
         self._draw()
 
     def _build(self):
-        self.root_ = lv.obj(self.parent)
-        self.root_.set_pos(0, 0)
-        self.root_.set_size(320, 480)
-        self.root_.set_style_bg_color(lv.color_hex(BG), 0)
-        self.root_.set_style_border_width(0, 0)
-        _zero_pad(self.root_)
+        self.root_ = ui.screen(self.parent)
+        self.header = ui.header(self.root_, TITLE, "Score 0")
+        self.header.set_status("Score 0", ui.TEXT)
 
-        self.score_label = _label(self.root_, "Score: 0", 10, 8, TEXT, 20)
-        self.status = _label(self.root_, "", 200, 8, 0x8FD4FF, 16)
-
-        board = _rect(self.root_, 4, 44, 312, 312, BOARD, radius=10)
-        board.remove_flag(lv.obj.FLAG.SCROLLABLE)
+        board = ui.card(self.root_, BOARD_X, BOARD_Y, BOARD, BOARD,
+                        bg=ui.SURFACE, radius=ui.R_LG)
         self.cells = []
-        self.labels = []
         for r in range(N):
-            row, rowlab = [], []
+            row = []
             for c in range(N):
-                x = GAP + c * (CELL + GAP)
-                y = GAP + r * (CELL + GAP)
-                cell = _rect(board, x, y, CELL, CELL, BOARD, radius=8)
-                lab = _label(cell, "", 0, 0, TEXT, 24)
-                lab.center()
-                row.append(cell)
-                rowlab.append(lab)
+                cell = ui.box(board, PAD + c * (CELL + GAP), PAD + r * (CELL + GAP),
+                              CELL, CELL, bg=ui.BG, radius=ui.R_MD)
+                mark = ui.label(cell, "", 0, 0, size=28, color=ui.TEXT,
+                                align=lv.ALIGN.CENTER)
+                row.append((cell, mark))
             self.cells.append(row)
-            self.labels.append(rowlab)
 
-        _button(self.root_, 104, 372, 56, 48, "^", lambda: self._move("up"), ACCENT)
-        _button(self.root_, 44, 372, 56, 48, "<", lambda: self._move("left"), ACCENT)
-        _button(self.root_, 164, 372, 56, 48, ">", lambda: self._move("right"), ACCENT)
-        _button(self.root_, 104, 424, 56, 48, "v", lambda: self._move("down"), ACCENT)
-        _button(self.root_, 226, 396, 84, 48, "Reset", self._reset, ACCENT)
+        # Arrow pad (inverted T) on the left, reset spanning both rows on the right:
+        # up above, left/down/right in the row below -- the usual gamepad silhouette.
+        ui.button(self.root_, "^", BOARD_X + (ARROW_W + ARROW_GAP), PAD_Y,
+                  width=ARROW_W, callback=lambda: self._move("up"), kind="primary")
+        lower_row = [("<", 0, "left"), ("v", 1, "down"), (">", 2, "right")]
+        for text, column, direction in lower_row:
+            ui.button(self.root_, text, BOARD_X + column * (ARROW_W + ARROW_GAP), PAD_ROW2,
+                      width=ARROW_W,
+                      callback=lambda d=direction: self._move(d), kind="primary")
+        ui.button(self.root_, "Reset", SIDE_X, PAD_Y, width=SIDE_W, height=PAD_H,
+                  callback=self._reset, kind="ghost")
 
     # ------------------------------------------------------------- game
     def _spawn(self):
@@ -168,21 +168,23 @@ class _Game2048:
         for r in range(N):
             for c in range(N):
                 value = self.grid[r][c]
-                color = TILE_COLORS.get(value, 0x00C0C0) if value else BOARD
-                self.cells[r][c].set_style_bg_color(lv.color_hex(color), 0)
-                self.labels[r][c].set_text(str(value) if value else "")
-                self.labels[r][c].center()
-        self.score_label.set_text("Score: %d" % self.score)
+                cell, mark = self.cells[r][c]
+                surface = _tile_shade(value) if value else ui.BG
+                cell.set_style_bg_color(lv.color_hex(surface), 0)
+                mark.set_text(str(value) if value else "")
+                if value:
+                    mark.set_style_text_font(ui.font(_digit_size(value)), 0)
+        self.header.set_status("Score %d" % self.score, ui.TEXT)
 
     def _check_state(self):
         for r in range(N):
             for c in range(N):
                 if self.grid[r][c] >= 2048:
-                    self.status.set_text("YOU WIN")
+                    self.header.set_status("Score %d - you win" % self.score, ui.OK)
                     return
         if not self._any_move():
             self.done = True
-            self.status.set_text("Game over")
+            self.header.set_status("Score %d - game over" % self.score, ui.DANGER)
 
     def _any_move(self):
         for r in range(N):
@@ -199,7 +201,7 @@ class _Game2048:
         self.grid = [[0] * N for _ in range(N)]
         self.score = 0
         self.done = False
-        self.status.set_text("")
+        self.header.set_status("Score 0", ui.TEXT)
         self._spawn()
         self._spawn()
         self._draw()
@@ -212,19 +214,13 @@ class _Game2048:
             except Exception:  # noqa: BLE001
                 pass
             self.timer = None
+        # root_ IS the active screen (ui.screen(parent)), so its widgets are removed
+        # instead of the screen itself: deleting the screen leaves the display without
+        # one and the next application has nothing to build on.
         try:
-            self.root_.delete()
+            self.root_.clean()
         except Exception:  # noqa: BLE001
             pass
-
-
-def _button(parent, x, y, w, h, text, cb, bg):
-    btn = _rect(parent, x, y, w, h, bg, radius=8)
-    btn.add_flag(lv.obj.FLAG.CLICKABLE)
-    lab = _label(btn, text, 0, 0, TEXT, 18)
-    lab.center()
-    btn.add_event_cb(lambda _e, cb=cb: cb(), lv.EVENT.CLICKED, None)
-    return btn
 
 
 def start(parent=None):

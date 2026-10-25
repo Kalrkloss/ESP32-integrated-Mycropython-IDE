@@ -93,7 +93,12 @@ def test_apps():
         # no LVGL work outside the main thread
         check("%s does not spawn threads" % name, "start_new_thread" not in text)
         # timers must be cleaned up, so the animated apps must have stop()
-        check("%s cleans up (delete/stop)" % name, ".delete(" in text or "delete" in text)
+        check("%s cleans up (clean/delete)" % name,
+              ".clean(" in text or ".delete(" in text)
+        # ui.screen() hands back the display's active screen; deleting it leaves
+        # lv.screen_active() == None and the next application cannot start
+        check("%s does not delete the active screen" % name,
+              "root_.delete()" not in text, "use root_.clean() instead")
 
 
 def test_launcher():

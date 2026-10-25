@@ -4,62 +4,35 @@
 #   TITLE / DESCRIPTION      short texts for the launcher (TITEL/BESCHREIBUNG aliases)
 #   start(parent=None)       builds the UI, returns a handle with .stop()
 #
-# Rules kept: only lvgl + stdlib, full cleanup in stop(), touch targets >= 40x40 px.
 # The keypad builds an expression string; it is evaluated with a strict whitelist
 # so no arbitrary code can be entered from the touch panel.
+#
+# Look and feel comes from _ui (tokens + widgets); this file only composes.
 
 import lvgl as lv
+
+import _ui as ui
 
 TITLE = "Calculator"
 DESCRIPTION = "A four function calculator with a large touch keypad."
 TITEL = TITLE
 BESCHREIBUNG = DESCRIPTION
 
-BG = 0x101820
-DISPLAY = 0x18242E
-KEY = 0x2C3646
-KEY_OP = 0x3A6EA5
-KEY_ACC = 0xC08030
-TEXT = 0xFFFFFF
-
 ALLOWED = set("0123456789.+-*/() ")
 
+# Keypad geometry: 4 columns of 66 px and 8 px gaps fill the 288 px content width,
+# five 52 px rows fill the band between the display and the footer.
+KEY_W = 66
+KEY_H = 52
+KEY_GAP = ui.S2
+KEYS_X = ui.S4
+KEYS_Y = 160
 
-def _font(size):
-    f = getattr(lv, "font_montserrat_%d" % size, None)
-    if f is None:
-        f = lv.font_montserrat_16
-    return f
+FUNCTIONS = "/*-+()C<"
 
-
-def _zero_pad(obj):
-    for name in ("set_style_pad_all", "set_style_pad_row", "set_style_pad_column"):
-        fn = getattr(obj, name, None)
-        if fn is not None:
-            try:
-                fn(0, 0)
-            except Exception:  # noqa: BLE001
-                pass
-
-
-def _rect(parent, x, y, w, h, color, radius=0):
-    obj = lv.obj(parent)
-    obj.set_pos(x, y)
-    obj.set_size(w, h)
-    obj.set_style_bg_color(lv.color_hex(color), 0)
-    obj.set_style_radius(radius, 0)
-    obj.set_style_border_width(0, 0)
-    _zero_pad(obj)
-    return obj
-
-
-def _label(parent, text, x, y, color, size=16):
-    lab = lv.label(parent)
-    lab.set_text(text)
-    lab.set_style_text_color(lv.color_hex(color), 0)
-    lab.set_style_text_font(_font(size), 0)
-    lab.set_pos(x, y)
-    return lab
+DISPLAY_Y = ui.HEADER_H + ui.S3
+DISPLAY_H = 80
+CONTENT_W = 320 - 2 * ui.S4          # 288
 
 
 class _Calculator:
@@ -77,40 +50,45 @@ class _Calculator:
         self._build()
 
     def _build(self):
-        self.root_ = lv.obj(self.parent)
-        self.root_.set_pos(0, 0)
-        self.root_.set_size(320, 480)
-        self.root_.set_style_bg_color(lv.color_hex(BG), 0)
-        self.root_.set_style_border_width(0, 0)
-        _zero_pad(self.root_)
+        self.root_ = ui.screen(self.parent)
+        self.header = ui.header(self.root_, TITLE, "Tap = to evaluate")
 
-        box = _rect(self.root_, 8, 8, 304, 96, DISPLAY, radius=10)
-        self.screen_label = _label(box, "0", 10, 20, TEXT, 32)
-        self.result_label = _label(box, "", 10, 62, 0x8FD4FF, 18)
+        # Two-line readout: the expression on top, the result underneath it.
+        display = ui.card(self.root_, ui.S4, DISPLAY_Y, CONTENT_W, DISPLAY_H)
+        self.screen_label = ui.label(display, "0", -ui.S3, ui.S2, size=32, color=ui.TEXT,
+                                     align=lv.ALIGN.TOP_RIGHT)
+        self.result_label = ui.label(display, "", -ui.S3, -ui.S2, size=20, color=ui.DIM,
+                                     align=lv.ALIGN.BOTTOM_RIGHT)
 
-        # Keypad: 4 columns x 5 rows, each key 72x66 -> touch targets well over 40.
-        key_w, key_h = 72, 66
-        gap = 4
-        left = 8
-        top = 116
         for r, row in enumerate(self.KEYS):
             for c, text in enumerate(row):
-                x = left + c * (key_w + gap)
-                y = top + r * (key_h + gap)
-                if text == "=":
-                    bg = KEY_ACC
-                elif text in "/*-+()":
-                    bg = KEY_OP
-                else:
-                    bg = KEY
-                self._key(x, y, key_w, key_h, text, bg)
+                x = KEYS_X + c * (KEY_W + KEY_GAP)
+                y = KEYS_Y + r * (KEY_H + KEY_GAP)
+                self._key(x, y, text)
 
-    def _key(self, x, y, w, h, text, bg):
-        btn = _rect(self.root_, x, y, w, h, bg, radius=8)
-        btn.add_flag(lv.obj.FLAG.CLICKABLE)
-        lab = _label(btn, text, 0, 0, TEXT, 24)
-        lab.center()
-        btn.add_event_cb(lambda _e, t=text: self._press(t), lv.EVENT.CLICKED, None)
+        ui.footer(self.root_, "four function  -  ( ) group  -  < deletes")
+
+    def _kind(self, text):
+        """Digit keys are neutral, function keys outline, the commit key is filled."""
+        if text == "=":
+            return "primary"
+        if text in FUNCTIONS:
+            return "quiet"
+        return "ghost"
+
+    def _key(self, x, y, text):
+        btn = ui.button(self.root_, text, x, y, width=KEY_W, height=KEY_H,
+                        callback=lambda t=text: self._press(t),
+                        kind=self._kind(text), radius=ui.R_MD)
+        # ui.button is sized for a 140 px wide button; a keypad tile carries a single
+        # glyph and reads better at the 24 px step, so the caption is lifted here.
+        face = ui.font(24)
+        if face is not None and hasattr(btn, "get_child"):
+            try:
+                btn.get_child(0).set_style_text_font(face, 0)
+            except Exception:  # noqa: BLE001 - binding without child access
+                pass
+        return btn
 
     def _press(self, key):
         if key == "C":
@@ -135,7 +113,7 @@ class _Calculator:
             self.result_label.set_text("error")
             return
         try:
-            value = int(value) if float(value).is_integer() else round(value, 6)
+            value = int(value) if float(value) == int(float(value)) else round(value, 6)
         except (ValueError, TypeError, OverflowError):
             self.result_label.set_text("error")
             return
@@ -144,7 +122,8 @@ class _Calculator:
     # ------------------------------------------------------------- lifecycle
     def stop(self):
         try:
-            self.root_.delete()
+            # root_ is the display's active screen -- clean it, never delete it.
+            self.root_.clean()
         except Exception:  # noqa: BLE001
             pass
 

@@ -75,9 +75,10 @@ class _Handle:
         self.objects = objects
 
     def stop(self):
-        while self.objects:
-            obj = self.objects.pop()
+        # The screen itself is not ours to delete: it is the display's active screen.
+        # Deleting it leaves lv.screen_active() == None and the next app cannot start.
+        for obj in self.objects:
             try:
-                obj.delete()
+                obj.clean()
             except Exception:  # noqa: BLE001
                 pass

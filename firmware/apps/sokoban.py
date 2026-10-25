@@ -5,27 +5,34 @@
 #   start(parent=None)       builds the UI, returns a handle with .stop()
 #
 # Rules kept: only lvgl + stdlib, our own lv.timer_create where needed, full
-# cleanup in stop(), touch targets >= 40x40 px, LVGL only from the main thread.
+# cleanup in stop(), LVGL only from the main thread.
+#
+# Look and feel comes from _ui (tokens + widgets); this file only composes.
+# A cell carries colour *and* the classic ASCII glyph, so the board still reads on
+# a display where the accent shades are close together.
 
 import lvgl as lv
+
+import _ui as ui
 
 TITLE = "Sokoban"
 DESCRIPTION = "Push every box onto a goal. Arrows move, undo and reset help."
 TITEL = TITLE
 BESCHREIBUNG = DESCRIPTION
 
-CELL = 40          # 8 x 8 tiles -> 320 x 320 pixels, 40 px touch targets
 N = 8
+CELL = 36                      # 8 x 8 slots -> 288 x 288 px board
+TILE = CELL - ui.S1            # 32 px square, 4 px gap from the S scale
+BOARD = N * CELL
+BOARD_X = (320 - BOARD) // 2
+BOARD_Y = ui.HEADER_H + ui.S2
 
-BG = 0x101820
-FLOOR = 0x202830
-WALL = 0x5A4632
-GOAL = 0x8FD4FF
-BOX = 0xC08030
-BOX_OK = 0x40C060
-PLAYER = 0x30A0E0
-TEXT = 0xFFFFFF
-ACCENT = 0x3A6EA5
+ARROW_W = 56
+ARROW_GAP = ui.S2
+SIDE_W = 96
+SIDE_X = 320 - ui.S4 - SIDE_W
+PAD_Y = BOARD_Y + BOARD + ui.S3
+PAD_ROW2 = PAD_Y + ui.TOUCH_MIN + ui.S2
 
 # Level maps: '#' wall, ' ' floor, '.' goal, '$' box, '*' box on goal,
 # '@' player, '+' player on goal. Rows are padded to 8 wide / tall.
@@ -53,52 +60,6 @@ LEVELS = [
 ]
 
 
-def _font(size):
-    f = getattr(lv, "font_montserrat_%d" % size, None)
-    if f is None:
-        f = lv.font_montserrat_16
-    return f
-
-
-def _zero_pad(obj):
-    for name in ("set_style_pad_all", "set_style_pad_row", "set_style_pad_column"):
-        fn = getattr(obj, name, None)
-        if fn is not None:
-            try:
-                fn(0, 0)
-            except Exception:  # noqa: BLE001
-                pass
-
-
-def _rect(parent, x, y, w, h, color, radius=0):
-    obj = lv.obj(parent)
-    obj.set_pos(x, y)
-    obj.set_size(w, h)
-    obj.set_style_bg_color(lv.color_hex(color), 0)
-    obj.set_style_radius(radius, 0)
-    obj.set_style_border_width(0, 0)
-    _zero_pad(obj)
-    return obj
-
-
-def _label(parent, text, x, y, color, size=16):
-    lab = lv.label(parent)
-    lab.set_text(text)
-    lab.set_style_text_color(lv.color_hex(color), 0)
-    lab.set_style_text_font(_font(size), 0)
-    lab.set_pos(x, y)
-    return lab
-
-
-def _button(parent, x, y, w, h, text, cb, bg, size=18):
-    btn = _rect(parent, x, y, w, h, bg, radius=8)
-    btn.add_flag(lv.obj.FLAG.CLICKABLE)
-    lab = _label(btn, text, 0, 0, TEXT, size)
-    lab.center()
-    btn.add_event_cb(lambda _e, cb=cb: cb(), lv.EVENT.CLICKED, None)
-    return btn
-
-
 class _Sokoban:
     def __init__(self, parent):
         self.parent = parent
@@ -110,34 +71,43 @@ class _Sokoban:
 
     # ------------------------------------------------------------- UI
     def _build(self):
-        self.root_ = lv.obj(self.parent)
-        self.root_.set_pos(0, 0)
-        self.root_.set_size(320, 480)
-        self.root_.set_style_bg_color(lv.color_hex(BG), 0)
-        self.root_.set_style_border_width(0, 0)
-        _zero_pad(self.root_)
+        self.root_ = ui.screen(self.parent)
+        self.header = ui.header(self.root_, TITLE, self._level_text(1))
 
-        self.info = _label(self.root_, "Level 1", 10, 8, TEXT, 18)
-        self.status = _label(self.root_, "", 180, 8, BOX_OK, 16)
-
-        field = _rect(self.root_, 0, 40, N * CELL, N * CELL, FLOOR)
-        field.remove_flag(lv.obj.FLAG.SCROLLABLE)
+        board = ui.box(self.root_, BOARD_X, BOARD_Y, BOARD, BOARD)
         self.cells = []
         for r in range(N):
             row = []
             for c in range(N):
-                row.append(_rect(field, c * CELL, r * CELL, CELL - 2, CELL - 2, FLOOR))
+                # Floor slots are dark wells with a hairline outline; a wall is the
+                # same slot filled with the raised surface, so the two never blend.
+                cell = ui.card(board, c * CELL, r * CELL, TILE, TILE,
+                               bg=ui.BG, radius=ui.R_SM)
+                mark = ui.label(cell, "", 0, 0, size=20, color=ui.TEXT,
+                                align=lv.ALIGN.CENTER)
+                row.append((cell, mark))
             self.cells.append(row)
 
-        # Arrow pad (cross) + undo/reset, all >= 40x40.
-        _button(self.root_, 94, 366, 56, 48, "^", lambda: self._move(-1, 0), ACCENT)
-        _button(self.root_, 34, 366, 56, 48, "<", lambda: self._move(0, -1), ACCENT)
-        _button(self.root_, 154, 366, 56, 48, ">", lambda: self._move(0, 1), ACCENT)
-        _button(self.root_, 94, 418, 56, 48, "v", lambda: self._move(1, 0), ACCENT)
-        _button(self.root_, 220, 366, 92, 48, "Undo", self._undo, ACCENT)
-        _button(self.root_, 220, 418, 92, 48, "Reset", self._reset, ACCENT)
+        # Arrow pad (inverted T) on the left, undo/reset in the right-hand column:
+        # up above, left/down/right in the row below -- the usual gamepad silhouette.
+        ui.button(self.root_, "^", BOARD_X + (ARROW_W + ARROW_GAP), PAD_Y,
+                  width=ARROW_W, callback=lambda: self._move(-1, 0), kind="primary")
+        lower_row = [("<", 0, 0, -1), ("v", 1, 1, 0), (">", 2, 0, 1)]
+        for text, column, dr, dc in lower_row:
+            ui.button(self.root_, text, BOARD_X + column * (ARROW_W + ARROW_GAP), PAD_ROW2,
+                      width=ARROW_W, callback=lambda a=dr, b=dc: self._move(a, b),
+                      kind="primary")
 
-        self.hint = _label(self.root_, "Make every box green", 10, 466, TEXT, 12)
+        ui.button(self.root_, "Undo", SIDE_X, PAD_Y, width=SIDE_W,
+                  callback=self._undo, kind="ghost")
+        ui.button(self.root_, "Reset", SIDE_X, PAD_ROW2, width=SIDE_W,
+                  callback=self._reset, kind="ghost")
+
+    def _level_text(self, index):
+        return "Level %d - every box on a goal" % index
+
+    def _status(self, text, color=ui.DIM):
+        self.header.set_status(text, color)
 
     # ------------------------------------------------------------- game
     def _load_level(self, index):
@@ -175,24 +145,33 @@ class _Sokoban:
                     row.append(" ")
             self.grid.append(row)
         self.history = []
-        self.status.set_text("")
-        self.info.set_text("Level %d" % (self.level_index + 1))
+        self._status(self._level_text(self.level_index + 1))
         self._draw()
+
+    def _tile(self, r, c):
+        """State -> (surface, ink, glyph), all of them tokens."""
+        if self.grid[r][c] == "#":
+            return ui.WALL, ui.TEXT, ""
+        if (r, c) in self.boxes:
+            if (r, c) in self.goals:
+                return ui.OK, ui.BG, "*"
+            return ui.WARN, ui.BG, "$"
+        if (r, c) == self.player:
+            return ui.ACCENT, ui.ACCENT_TEXT, "@"
+        if (r, c) in self.goals:
+            return ui.BG, ui.DIM, "o"
+        return ui.BG, ui.TEXT, ""
 
     def _draw(self):
         for r in range(N):
             for c in range(N):
-                if self.grid[r][c] == "#":
-                    color = WALL
-                elif (r, c) in self.boxes:
-                    color = BOX_OK if (r, c) in self.goals else BOX
-                elif (r, c) == self.player:
-                    color = PLAYER
-                elif (r, c) in self.goals:
-                    color = GOAL
-                else:
-                    color = FLOOR
-                self.cells[r][c].set_style_bg_color(lv.color_hex(color), 0)
+                cell, mark = self.cells[r][c]
+                surface, ink, glyph = self._tile(r, c)
+                cell.set_style_bg_color(lv.color_hex(surface), 0)
+                cell.set_style_border_color(
+                    lv.color_hex(ui.LINE if surface == ui.BG else ui.GRID_LINE), 0)
+                mark.set_style_text_color(lv.color_hex(ink), 0)
+                mark.set_text(glyph)
 
     def _move(self, dr, dc):
         pr, pc = self.player
@@ -216,15 +195,14 @@ class _Sokoban:
             self.boxes, self.player = self.history.pop()
             self.boxes = set(self.boxes)
             self._draw()
-            self.status.set_text("")
+            self._status(self._level_text(self.level_index + 1))
 
     def _reset(self):
         self._load_level(self.level_index)
 
     def _check_win(self):
         if self.boxes and self.boxes.issubset(self.goals):
-            self.status.set_text("SOLVED!")
-            self.info.set_text("Level %d done" % (self.level_index + 1))
+            self._status("Level %d solved" % (self.level_index + 1), ui.OK)
 
     # ------------------------------------------------------------- lifecycle
     def stop(self):
@@ -234,8 +212,11 @@ class _Sokoban:
             except Exception:  # noqa: BLE001
                 pass
             self.timer = None
+        # root_ IS the active screen (ui.screen(parent)), so its widgets are removed
+        # instead of the screen itself: deleting the screen leaves the display without
+        # one and the next application has nothing to build on.
         try:
-            self.root_.delete()
+            self.root_.clean()
         except Exception:  # noqa: BLE001
             pass
 

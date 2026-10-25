@@ -5,77 +5,40 @@
 #   start(parent=None)       builds the UI, returns a handle with .stop()
 #
 # Rules kept: only lvgl + stdlib, our own lv.timer_create where needed, full
-# cleanup in stop(), touch targets >= 40x40 px, LVGL only from the main thread.
+# cleanup in stop(), every control at least 48 px tall, LVGL only from the main thread.
+#
+# Look and feel comes from _ui (tokens + widgets); this file only composes.
 
 import random
 
 import lvgl as lv
+
+import _ui as ui
 
 TITLE = "Minesweeper"
 DESCRIPTION = "Find every safe tile. Tap to dig, toggle a mode to flag mines."
 TITEL = TITLE
 BESCHREIBUNG = DESCRIPTION
 
-N = 8              # 8 x 8 board -> 320 x 320 pixels, 40 px touch targets
-CELL = 40
+N = 8                                  # 8 x 8 board
+CELL = 34
+GAP = ui.S1                            # 4 px between tiles
+BOARD = N * CELL + (N - 1) * GAP       # 300 px
+BOARD_X = (320 - BOARD) // 2
+BOARD_Y = ui.HEADER_H + ui.S2
+ACTION_Y = BOARD_Y + BOARD + ui.S3
 MINES = 10
 
-BG = 0x101820
-HIDDEN = 0x3A4250
-OPEN = 0x202830
-FLAG = 0xE0A030
-MINE = 0xE04040
-TEXT = 0xFFFFFF
-ACCENT = 0x3A6EA5
+# Tile colours, from the design tokens only.
+HIDDEN = ui.SURFACE_ALT                # untouched tile
+OPEN = ui.SURFACE                      # dug tile, reads as recessed
+FLAG = ui.MARK_O
+MINE = ui.DANGER
 
-NUM_COLORS = {1: 0x60A0FF, 2: 0x40C060, 3: 0xE06060, 4: 0xA060E0,
-              5: 0xE0A030, 6: 0x40D0D0, 7: 0xD0D0D0, 8: 0x808080}
-
-
-def _font(size):
-    f = getattr(lv, "font_montserrat_%d" % size, None)
-    if f is None:
-        f = lv.font_montserrat_16
-    return f
-
-
-def _zero_pad(obj):
-    for name in ("set_style_pad_all", "set_style_pad_row", "set_style_pad_column"):
-        fn = getattr(obj, name, None)
-        if fn is not None:
-            try:
-                fn(0, 0)
-            except Exception:  # noqa: BLE001
-                pass
-
-
-def _rect(parent, x, y, w, h, color, radius=0):
-    obj = lv.obj(parent)
-    obj.set_pos(x, y)
-    obj.set_size(w, h)
-    obj.set_style_bg_color(lv.color_hex(color), 0)
-    obj.set_style_radius(radius, 0)
-    obj.set_style_border_width(0, 0)
-    _zero_pad(obj)
-    return obj
-
-
-def _label(parent, text, x, y, color, size=16):
-    lab = lv.label(parent)
-    lab.set_text(text)
-    lab.set_style_text_color(lv.color_hex(color), 0)
-    lab.set_style_text_font(_font(size), 0)
-    lab.set_pos(x, y)
-    return lab
-
-
-def _button(parent, x, y, w, h, text, cb, bg, size=16):
-    btn = _rect(parent, x, y, w, h, bg, radius=8)
-    btn.add_flag(lv.obj.FLAG.CLICKABLE)
-    lab = _label(btn, text, 0, 0, TEXT, size)
-    lab.center()
-    btn.add_event_cb(lambda _e, cb=cb: cb(), lv.EVENT.CLICKED, None)
-    return btn
+# Count colours. The token set has no eight-step ramp, so the ramp is built from
+# the semantic and marker colours: still one place, still no raw hex.
+NUM_COLORS = {1: ui.MARK_X, 2: ui.OK, 3: ui.DANGER, 4: ui.ACCENT,
+              5: ui.MARK_O, 6: ui.WARN, 7: ui.TEXT, 8: ui.DIM}
 
 
 class _Minesweeper:
@@ -92,37 +55,34 @@ class _Minesweeper:
 
     # ------------------------------------------------------------- UI
     def _build(self):
-        self.root_ = lv.obj(self.parent)
-        self.root_.set_pos(0, 0)
-        self.root_.set_size(320, 480)
-        self.root_.set_style_bg_color(lv.color_hex(BG), 0)
-        self.root_.set_style_border_width(0, 0)
-        _zero_pad(self.root_)
+        self.root_ = ui.screen(self.parent)
+        self.header = ui.header(self.root_, TITLE, "Mines: %d" % MINES)
+        self.status = ui.label(self.header.band, "", -ui.S4, 0, size=18,
+                               color=ui.DIM, align=lv.ALIGN.RIGHT_MID)
 
-        self.info = _label(self.root_, "Mines: %d" % MINES, 10, 8, TEXT, 18)
-        self.status = _label(self.root_, "", 200, 8, FLAG, 16)
-
-        field = _rect(self.root_, 0, 40, N * CELL, N * CELL, OPEN)
-        field.remove_flag(lv.obj.FLAG.SCROLLABLE)
+        field = ui.box(self.root_, BOARD_X, BOARD_Y, BOARD, BOARD)
         self.cells = []
         self.labels = []
         for r in range(N):
             row, rowlab = [], []
             for c in range(N):
-                cell = _rect(field, c * CELL, r * CELL, CELL - 2, CELL - 2, HIDDEN)
-                cell.add_flag(lv.obj.FLAG.CLICKABLE)
-                lab = _label(cell, "", 0, 0, TEXT, 18)
-                lab.center()
-                cell.add_event_cb(lambda _e, r=r, c=c: self._tap(r, c), lv.EVENT.CLICKED, None)
+                cell = ui.card(field, c * (CELL + GAP), r * (CELL + GAP), CELL, CELL,
+                               bg=HIDDEN, radius=ui.R_SM, border=ui.GRID_LINE)
+                lab = ui.label(cell, "", 0, 0, size=18, color=ui.TEXT,
+                               align=lv.ALIGN.CENTER)
+                # No click-area extension: the 4 px gaps would make two neighbours'
+                # hit areas touch, so the tile itself is the target.
+                ui.tap(cell, lambda r=r, c=c: self._tap(r, c), extra=0)
                 row.append(cell)
                 rowlab.append(lab)
             self.cells.append(row)
             self.labels.append(rowlab)
 
-        self.mode_btn = _button(self.root_, 8, 368, 150, 50, "Mode: Dig",
-                                self._toggle_mode, ACCENT)
-        _button(self.root_, 166, 368, 146, 50, "New game", self._reset, ACCENT)
-        self.hint = _label(self.root_, "Tap a tile to reveal it", 10, 428, TEXT, 14)
+        self.mode_btn = ui.button(self.root_, "Mode: Dig", 8, ACTION_Y, width=148,
+                                  kind="ghost", callback=self._toggle_mode)
+        ui.button(self.root_, "New game", 164, ACTION_Y, width=148,
+                  kind="ghost", callback=self._reset)
+        ui.footer(self.root_, "Tap a tile to reveal it")
 
     def _toggle_mode(self):
         self.flag_mode = not self.flag_mode
@@ -194,7 +154,7 @@ class _Minesweeper:
             cell.set_style_bg_color(lv.color_hex(OPEN), 0)
             n = self._count(r, c)
             lab.set_text("" if n == 0 else str(n))
-            lab.set_style_text_color(lv.color_hex(NUM_COLORS.get(n, TEXT)), 0)
+            lab.set_style_text_color(lv.color_hex(NUM_COLORS.get(n, ui.TEXT)), 0)
         else:
             cell.set_style_bg_color(lv.color_hex(HIDDEN), 0)
             lab.set_text("")
@@ -209,15 +169,17 @@ class _Minesweeper:
         self.state = "lost"
         for mr, mc in self.mines:
             self.labels[mr][mc].set_text("*")
-            self.labels[mr][mc].set_style_text_color(lv.color_hex(TEXT), 0)
+            self.labels[mr][mc].set_style_text_color(lv.color_hex(ui.TEXT), 0)
             self.labels[mr][mc].center()
         self.cells[r][c].set_style_bg_color(lv.color_hex(MINE), 0)
         self.status.set_text("BOOM!")
+        self.status.set_style_text_color(lv.color_hex(ui.DANGER), 0)
 
     def _check_win(self):
         if len(self.open_cells) == N * N - len(self.mines):
             self.state = "won"
             self.status.set_text("CLEAR!")
+            self.status.set_style_text_color(lv.color_hex(ui.OK), 0)
 
     def _reset(self):
         self.state = "run"
@@ -227,6 +189,7 @@ class _Minesweeper:
         self.open_cells = set()
         self.flags = set()
         self.status.set_text("")
+        self.status.set_style_text_color(lv.color_hex(ui.DIM), 0)
         self.mode_btn.get_child(0).set_text("Mode: Dig")
         for r in range(N):
             for c in range(N):
@@ -243,7 +206,8 @@ class _Minesweeper:
                 pass
             self.timer = None
         try:
-            self.root_.delete()
+            # root_ is the display's active screen -- clean it, never delete it.
+            self.root_.clean()
         except Exception:  # noqa: BLE001
             pass
 

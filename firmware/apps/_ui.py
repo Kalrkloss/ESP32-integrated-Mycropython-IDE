@@ -19,6 +19,7 @@ SURFACE = 0x18222D         # cards, rows, panels
 SURFACE_ALT = 0x22303E     # pressed/hover surface, grid gaps
 LINE = 0x2A3947            # hairlines only -- never text (1.6:1 on BG, decorative)
 GRID_LINE = 0x4F6377       # outline of touchable tiles: 3.0:1 on BG, the non-text minimum
+WALL = 0x46596C            # solid structure (maze walls): 2.6:1 on BG, reads as a block
 # Text
 TEXT = 0xF2F6FA            # 14.8:1 on SURFACE
 DIM = 0x9FB0C0             # 7.2:1 on SURFACE, secondary lines only
@@ -206,7 +207,7 @@ def tap(obj, callback, extra=8):
 
 
 def button(parent, text, x, y, width=140, height=TOUCH_MIN, callback=None,
-           kind="primary", radius=R_MD):
+           kind="primary", radius=R_MD, size=20):
     """The only button builder: same anatomy and the same three states everywhere."""
     if kind == "primary":
         fill, fill_pressed, ink = ACCENT, ACCENT_PRESSED, ACCENT_TEXT
@@ -230,7 +231,7 @@ def button(parent, text, x, y, width=140, height=TOUCH_MIN, callback=None,
     btn.set_style_bg_opa(lv.OPA._50, _state(MAIN, STATE_DISABLED))
     btn.set_style_text_color(lv.color_hex(DIM), _state(MAIN, STATE_DISABLED))
 
-    label(btn, text, 0, 0, size=18, color=ink, align=lv.ALIGN.CENTER)
+    label(btn, text, 0, 0, size=size, color=ink, align=lv.ALIGN.CENTER)
     tap(btn, callback)
     return btn
 

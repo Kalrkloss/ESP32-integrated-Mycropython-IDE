@@ -5,67 +5,39 @@
 #   start(parent=None)       builds the UI, returns a handle with .stop()
 #
 # Rules kept: only lvgl + stdlib, animation via our own lv.timer_create, full
-# cleanup in stop(), touch targets >= 40x40 px, LVGL is only touched from the
-# main thread (the game loop is an LVGL timer, so it runs in the main loop).
+# cleanup in stop(), every control at least 48 px tall, LVGL is only touched from
+# the main thread (the game loop is an LVGL timer, so it runs in the main loop).
+#
+# Look and feel comes from _ui (tokens + widgets); this file only composes.
 
 import random
 
 import lvgl as lv
+
+import _ui as ui
 
 TITLE = "Snake"
 DESCRIPTION = "Steer the snake, eat the food, do not bite yourself."
 TITEL = TITLE
 BESCHREIBUNG = DESCRIPTION
 
-CELL = 40          # touch target size; the field is CELL * N pixels
-N = 8              # 8 x 8 cells -> 320 x 320 pixel field
+N = 8                      # 8 x 8 cells
+GAP = ui.S1                # 4 px between tiles
+CELL = 32                  # tile size -> 8 * 32 + 7 * 4 = 284 px field
+FIELD = N * CELL + (N - 1) * GAP
+FIELD_X = (320 - FIELD) // 2
+FIELD_Y = ui.HEADER_H + ui.S2
 TICK_MS = 200
 
-BG = 0x101820
-FIELD = 0x202830
-SNAKE = 0x30D060
-HEAD = 0x00FFA0
-FOOD = 0xE04040
-TEXT = 0xFFFFFF
-ACCENT = 0x3A6EA5
+PAD = 48                   # arrow buttons: square, exactly the touch minimum
+PAD_Y = FIELD_Y + FIELD + ui.S2
+RESET_Y = PAD_Y + PAD + ui.S2
 
-
-def _font(size):
-    """Largest available montserrat font at or below `size` (fallback 16)."""
-    f = getattr(lv, "font_montserrat_%d" % size, None)
-    if f is None:
-        f = lv.font_montserrat_16
-    return f
-
-
-def _zero_pad(obj):
-    for name in ("set_style_pad_all", "set_style_pad_row", "set_style_pad_column"):
-        fn = getattr(obj, name, None)
-        if fn is not None:
-            try:
-                fn(0, 0)
-            except Exception:  # noqa: BLE001
-                pass
-
-
-def _rect(parent, x, y, w, h, color, radius=0):
-    obj = lv.obj(parent)
-    obj.set_pos(x, y)
-    obj.set_size(w, h)
-    obj.set_style_bg_color(lv.color_hex(color), 0)
-    obj.set_style_radius(radius, 0)
-    obj.set_style_border_width(0, 0)
-    _zero_pad(obj)
-    return obj
-
-
-def _label(parent, text, x, y, color, size=16):
-    lab = lv.label(parent)
-    lab.set_text(text)
-    lab.set_style_text_color(lv.color_hex(color), 0)
-    lab.set_style_text_font(_font(size), 0)
-    lab.set_pos(x, y)
-    return lab
+# Tile colours, from the design tokens only.
+EMPTY = ui.SURFACE_ALT     # free cell
+BODY = ui.OK               # snake body
+HEAD = ui.MARK_X           # snake head
+FOOD = ui.DANGER           # food
 
 
 class _Snake:
@@ -85,38 +57,37 @@ class _Snake:
 
     # ------------------------------------------------------------- UI
     def _build(self):
-        self.root_ = lv.obj(self.parent)
-        self.root_.set_pos(0, 0)
-        self.root_.set_size(320, 480)
-        self.root_.set_style_bg_color(lv.color_hex(BG), 0)
-        self.root_.set_style_border_width(0, 0)
-        _zero_pad(self.root_)
+        self.root_ = ui.screen(self.parent)
+        self.header = ui.header(self.root_, TITLE, "Steer with the pad")
+        self.score_label = ui.label(self.header.band, "Score: 0", -ui.S4, 0, size=16,
+                                    color=ui.DIM, align=lv.ALIGN.RIGHT_MID)
 
-        self.score_label = _label(self.root_, "Score: 0", 10, 8, TEXT, 20)
-
-        field = _rect(self.root_, 0, 44, N * CELL, N * CELL, FIELD)
-        field.remove_flag(lv.obj.FLAG.SCROLLABLE)
+        field = ui.box(self.root_, FIELD_X, FIELD_Y, FIELD, FIELD)
         self.cells = []
         for r in range(N):
             row = []
             for c in range(N):
-                cell = _rect(field, c * CELL, r * CELL, CELL - 2, CELL - 2, FIELD)
-                row.append(cell)
+                tile = ui.card(field, c * (CELL + GAP), r * (CELL + GAP), CELL, CELL,
+                               bg=EMPTY, radius=ui.R_SM, border=ui.GRID_LINE)
+                row.append(tile)
             self.cells.append(row)
 
-        self.status = _label(self.root_, "", 10, 372, FOOD, 18)
+        # Movement pad: four arrows in one row, each a full touch target.
+        step = PAD + ui.S2
+        left = (320 - (4 * PAD + 3 * ui.S2)) // 2
+        self._arrow(left, PAD_Y, "<", (-1, 0))
+        self._arrow(left + step, PAD_Y, "^", (0, -1))
+        self._arrow(left + 2 * step, PAD_Y, "v", (0, 1))
+        self._arrow(left + 3 * step, PAD_Y, ">", (1, 0))
 
-        # Movement pad: 4 arrows in a cross, all >= 40x40.
-        self._arrow(120, 400, "^", (0, -1))
-        self._arrow(60, 400, "<", (-1, 0))
-        self._arrow(180, 400, ">", (1, 0))
-        self._arrow(120, 448, "v", (0, 1))
-        _button(self.root_, 244, 424, 66, 56, "Restart", self._reset, ACCENT)
+        ui.button(self.root_, "Restart", (320 - 160) // 2, RESET_Y, width=160,
+                  kind="ghost", callback=self._reset)
 
     def _arrow(self, x, y, text, direction):
         def press():
             self.next_dir = direction
-        _button(self.root_, x, y, 56, 48, text, press, ACCENT)
+        ui.button(self.root_, text, x, y, width=PAD, height=PAD,
+                  callback=press, kind="ghost")
 
     # ------------------------------------------------------------- game
     def _spawn_food(self):
@@ -131,11 +102,11 @@ class _Snake:
                 if (c, r) == self.snake[0]:
                     color = HEAD
                 elif (c, r) in body:
-                    color = SNAKE
+                    color = BODY
                 elif (c, r) == self.food:
                     color = FOOD
                 else:
-                    color = FIELD
+                    color = EMPTY
                 self.cells[r][c].set_style_bg_color(lv.color_hex(color), 0)
 
     def _tick(self, _timer=None):
@@ -159,7 +130,7 @@ class _Snake:
 
     def _game_over(self):
         self.state = "over"
-        self.status.set_text("Game over -- score %d" % self.score)
+        self.header.set_status("Game over - score %d" % self.score, ui.DANGER)
 
     def _reset(self):
         self.state = "run"
@@ -168,7 +139,7 @@ class _Snake:
         self.snake = [(2, 4), (1, 4), (0, 4)]
         self.score = 0
         self.score_label.set_text("Score: 0")
-        self.status.set_text("")
+        self.header.set_status("Steer with the pad", ui.DIM)
         self._spawn_food()
         self._draw()
 
@@ -181,18 +152,10 @@ class _Snake:
                 pass
             self.timer = None
         try:
-            self.root_.delete()
+            # root_ is the display's active screen -- clean it, never delete it.
+            self.root_.clean()
         except Exception:  # noqa: BLE001
             pass
-
-
-def _button(parent, x, y, w, h, text, cb, bg):
-    btn = _rect(parent, x, y, w, h, bg, radius=8)
-    btn.add_flag(lv.obj.FLAG.CLICKABLE)
-    lab = _label(btn, text, 0, 0, TEXT, 18)
-    lab.center()
-    btn.add_event_cb(lambda _e, cb=cb: cb(), lv.EVENT.CLICKED, None)
-    return btn
 
 
 def start(parent=None):

@@ -134,8 +134,10 @@ class _TicTacToe:
 
     # ------------------------------------------------------------- lifecycle
     def stop(self):
+        # root_ is the display's active screen (ui.screen returns it), so clean it
+        # instead of deleting it -- otherwise the next application has no screen.
         try:
-            self.root_.delete()
+            self.root_.clean()
         except Exception:  # noqa: BLE001
             pass
 
