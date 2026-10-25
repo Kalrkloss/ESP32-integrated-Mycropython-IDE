@@ -16,7 +16,21 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-EMU="${ESP32SIM:-/root/esp32sim/target/release/esp32sim}"
+EMU="${ESP32SIM:-}"
+if [ -z "$EMU" ]; then
+  # Pick a binary that actually knows the board, wherever a worktree built one; the
+  # main checkout is the fallback so an unsupported emulator still reports the board list.
+  for candidate in /root/esp32sim*/target/release/esp32sim; do
+    [ -x "$candidate" ] || continue
+    if ! "$candidate" --chip s3 --board jc3248w535 --boot rom \
+         --rom /root/esp32sim/roms/esp32s3_rev0_rom.elf --max-seconds 1 2>&1 \
+         | grep -q 'unknown board'; then
+      EMU="$candidate"
+      break
+    fi
+  done
+  EMU="${EMU:-/root/esp32sim/target/release/esp32sim}"
+fi
 ROM="${ROM:-/root/esp32sim/roms/esp32s3_rev0_rom.elf}"
 FW="${FW:-/opt/lvgl_micropython/build/lvgl_micropy_ESP32_GENERIC_S3-SPIRAM_OCT-16.bin}"
 FS="${FS:-/root/.hermes/cache/scratch/board-vfs.img}"   # FAT dump of the vfs partition, 0x820000
@@ -62,8 +76,10 @@ rm -f "$png"
        --tft-png "$png" > "$log" 2>&1
 
 booted=0
-grep -q 'MicroPython .* on ' "$log" && booted=1
-banner="$(grep -m1 'MicroPython .* on ' "$log" | tr -d '\r')"
+# The banner goes to the USB-Serial/JTAG console and can be absent when the firmware is
+# already past it; "Performing initial setup" or a boot.py line prove the interpreter ran.
+if grep -qE 'MicroPython .* on |Performing initial setup|^boot: ' "$log"; then booted=1; fi
+banner="$(grep -m1 -E 'MicroPython .* on |^boot: ' "$log" | tr -d '\r')"
 panel="$(grep -m1 -i '\[emu\].*bbox=\|\[emu\].*panel\|\[emu\].*tft' "$log" | tr -d '\r')"
 setup=0
 grep -q 'setup mode' "$log" && setup=1

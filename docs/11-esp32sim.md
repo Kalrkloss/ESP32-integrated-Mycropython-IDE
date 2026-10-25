@@ -27,15 +27,23 @@ The check reads `$ESP32SIM` (default `/root/esp32sim/target/release/esp32sim`), 
 
 ## Baseline, measured (no JC3248W535 model)
 
+Without the filesystem image the boot stops at the REPL (`booted : MicroPython ... Octal-SPIRAM`),
+with it `boot.py` runs and reports its credentials, then the run goes quiet:
+
 ```
-booted : MicroPython 78ff170de9-dirty on 2026-10-25; Generic ESP32S3 module with Octal-SPIRAM
-exit   : 1  (no display line, no PNG)
+$ BOARD=none tools/esp32sim-check.sh
+booted   : 1  boot: credentials loaded (app, board, configured, display, hostname, password, ssid)
+app      : <no main.py line>      panel: <no display line>      png: missing
+exit     : 1
 ```
 
-So the firmware itself runs under the emulator: ROM boot chain, bootloader, MicroPython
-banner and REPL all come up. What is missing is the panel model -- the AXS15231B is driven
-over QSPI, and until esp32sim models that controller the display stays dark and `main.py`
-cannot finish its display bring-up.
+So the interpreter, `boot.py` and the partition image all work; what is missing is the
+panel. The AXS15231B hangs on QSPI, and until esp32sim models that controller the display
+stays dark and `main.py` never gets past its display bring-up.
+
+`tools/esp32sim-check.sh` picks the first emulator binary under `/root/esp32sim*/target/release`
+that accepts the board name, so a model built in another worktree is used without touching
+that tree; `$ESP32SIM` overrides the choice.
 
 ## Pitfalls
 
