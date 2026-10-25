@@ -17,6 +17,7 @@ work and the lessons learned. This index only says what each document contains.
 | [`08-apps.md`](08-apps.md) | The example applications, their contract, the loader, how to choose and switch applications, how to deploy and verify them |
 | [`09-lessons-learned.md`](09-lessons-learned.md) | Every rule that cost time, with the symptom, the cause and the measurement - read this before debugging |
 | [`10-lvgl-design.md`](10-lvgl-design.md) | The design system: tokens in `_ui.py`, widget anatomy, contrast, fonts in `lv_conf.h`, and the off-device preview loop that renders a screen to a PNG |
+| [`11-esp32sim.md`](11-esp32sim.md) | Booting the firmware in esp32sim: full-image vs `--app`, the `vfs` partition image, the check script, the measured baseline and its exit codes |
 
 ## Reading order for a new agent
 
