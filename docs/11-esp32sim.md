@@ -45,6 +45,41 @@ stays dark and `main.py` never gets past its display bring-up.
 that accepts the board name, so a model built in another worktree is used without touching
 that tree; `$ESP32SIM` overrides the choice.
 
+## Verified: the panel model drives this firmware
+
+With esp32sim's `jc3248w535` board (commit `1d393bd2`, built in a separate worktree) the
+firmware runs end to end:
+
+```
+display_config: board JC3248W535, display axs15231b (320x480, qspi)
+display_config: SPIBusFast (DMA, chunked transfers)
+display_config: two full frame buffers (307200 bytes each)
+display_config: init ok
+display_config: touch axs15231 at address 0x3B
+main: touch ok
+app_loader: started launcher
+main: debug server on http://10.0.2.15/
+qspi panel 320x480: 98 packets (98 commands), 614530 continuation bytes,
+                    3 RAMWR, 307202 pixels, bbox=Some((0, 0, 319, 479))
+```
+
+The emulator's panel frame is **pixel-identical** to the frame the board puts on its own
+glass: the launcher captures compared 153600 pixels, 0 differing, maximum channel delta 0
+(the PNG files hash differently only because of encoding). So the QSPI framing, the
+chunked `SPIBusFast` writes, the full-frame refresh and the touch init all match.
+
+Reproduce:
+
+```bash
+tools/esp32sim-fs.sh                       # vfs partition from the board
+WIFI="ssid=...\,psk=...\,chan=6" tools/esp32sim-check.sh   # credentials from wifi.json
+```
+
+**The `--wifi` is not optional.** Without a virtual AP the guest cannot join, `boot.py`
+sits in its 45 s connect timeout and `main.py` never starts -- the panel model then reports
+`0 packets` and the PNG is an empty white GRAM, which looks like a broken panel model but
+is a firmware that never reached the display.
+
 ## Pitfalls
 
 - `--max-seconds` is mandatory for a probe. Without it the emulator runs until killed, and

@@ -44,6 +44,10 @@ mkdir -p "$OUT"
 [ -f "$FW" ] || { echo "no firmware at $FW (set FW)"; exit 4; }
 
 extra=()
+if [ -n "${WIFI:-}" ]; then
+  # ssid=...,psk=...,chan=... -- the emulator's virtual AP the guest joins
+  extra+=(--wifi "$WIFI")
+fi
 if [ -n "$FS" ] && [ -f "$FS" ]; then
   extra+=(--flash-at "0x820000=$FS")
 else
